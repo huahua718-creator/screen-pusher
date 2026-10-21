@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>傳屏遙控器</title>
   <style>
-    body { font-family: sans-serif; padding: 15px; background: #f2f2f7; color: #333; margin: 0; }
-    .card { background: white; padding: 18px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); margin-bottom: 12px; }
+    body { font-family: sans-serif; padding: 12px; background: #f2f2f7; color: #333; margin: 0; }
+    .card { background: white; padding: 16px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); margin-bottom: 12px; }
     label { font-size: 0.85rem; color: #666; font-weight: bold; display: block; margin-bottom: 6px; }
     input { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 8px; margin-bottom: 10px; box-sizing: border-box; font-size: 1rem; }
     
@@ -18,11 +18,11 @@
     .tab-content.active { display: block; }
     
     button.action-btn { width: 100%; padding: 12px; background: #007aff; color: white; border: none; border-radius: 8px; font-size: 1rem; font-weight: bold; cursor: pointer; margin-top: 5px; }
+    button.push-btn { background: #34c759; }
     button.stop-btn { background: #ff3b30; }
     .btn-group { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
     .btn-sub { background: #e5e5ea; color: #000; flex: 1; min-width: 45%; padding: 10px; border: none; border-radius: 8px; font-size: 0.85rem; }
 
-    /* 手機畫筆面板樣式 */
     #draw-pad { width: 100%; height: 260px; background: #1c1c1e; border-radius: 8px; touch-action: none; cursor: crosshair; }
     .color-picker { display: flex; gap: 10px; margin: 10px 0; }
     .color-btn { width: 32px; height: 32px; border-radius: 50%; border: 2px solid #fff; cursor: pointer; }
@@ -30,18 +30,18 @@
 </head>
 <body>
 
-  <div style="padding: 10px;">
-    <!-- 房間 PIN 碼 -->
+  <div style="padding: 5px;">
+    <!-- 大屏房間碼 -->
     <div class="card">
       <label for="room-input">大屏房間碼 (PIN)：</label>
       <input type="text" id="room-input" placeholder="例如：839201">
     </div>
 
-    <!-- 模式選擇 -->
+    <!-- 模式選擇分頁 -->
     <div class="nav-tabs">
       <button class="tab-btn active" onclick="switchTab('url-tab', this)">網址推送</button>
-      <button class="tab-btn" onclick="switchTab('camera-tab', this)">無線鏡頭</button>
-      <button class="tab-btn" onclick="switchTab('draw-tab', this)">畫筆標註</button>
+      <button class="tab-btn" id="cam-tab-btn" onclick="switchTab('camera-tab', this)">鏡頭與拍照</button>
+      <button class="tab-btn" id="draw-tab-btn" onclick="switchTab('draw-tab', this)">畫筆標註</button>
       <button class="tab-btn" onclick="switchTab('mic-tab', this)">麥克風</button>
     </div>
 
@@ -60,23 +60,27 @@
       </div>
     </div>
 
-    <!-- 2. 無線鏡頭 (含手機即時預覽與拍照) -->
+    <!-- 2. 無線鏡頭與拍照推送 -->
     <div id="camera-tab" class="tab-content card">
-      <p style="font-size: 0.85rem; color: #666; margin-bottom: 10px;">將手機鏡頭實時投射至大屏（無線實物投影機）</p>
+      <p style="font-size: 0.85rem; color: #666; margin-bottom: 10px;">可進行【實時動態投屏】或【拍照定格推送到大屏】</p>
       
-      <!-- 手機端畫面同步預覽 -->
+      <!-- 手機端鏡頭預覽 -->
       <div id="preview-box" style="display:none; margin-bottom: 10px;">
         <video id="local-preview" autoplay playsinline muted style="width:100%; border-radius:8px; background:#000;"></video>
-        <button onclick="takeSnapshot()" style="background:#34c759; color:white; border:none; padding:10px; width:100%; border-radius:8px; margin-top:6px; font-weight:bold;">📸 拍照截圖並下載</button>
+        
+        <div style="display: flex; gap: 8px; margin-top: 8px;">
+          <button class="action-btn push-btn" style="flex:1; font-size:0.9rem;" onclick="pushSnapshotToScreen()">🚀 拍照推送到大屏</button>
+          <button class="action-btn" style="flex:1; background:#5856d6; font-size:0.9rem;" onclick="takeLocalSnapshot()">💾 拍照存到手機</button>
+        </div>
       </div>
 
-      <button id="cam-start-btn" class="action-btn" onclick="startWebRTC('camera')">開啟手機鏡頭投屏</button>
-      <button id="cam-stop-btn" class="action-btn stop-btn" style="display:none;" onclick="stopWebRTC()">停止鏡頭投屏</button>
+      <button id="cam-start-btn" class="action-btn" onclick="startWebRTC('camera')">開啟手機鏡頭</button>
+      <button id="cam-stop-btn" class="action-btn stop-btn" style="display:none;" onclick="stopWebRTC()">關閉手機鏡頭</button>
     </div>
 
-    <!-- 3. 畫筆標註面板 -->
+    <!-- 3. 畫筆標註 -->
     <div id="draw-tab" class="tab-content card">
-      <label>在下方畫布上手指滑動，大屏同步繪製：</label>
+      <label>在大屏畫面上劃線標註（可用於批改作業）：</label>
       <canvas id="draw-pad"></canvas>
       
       <div class="color-picker">
@@ -87,7 +91,7 @@
         <div class="color-btn" style="background:#ffffff;" onclick="setColor('#ffffff')"></div>
       </div>
 
-      <button class="action-btn stop-btn" onclick="clearCanvas()">🧹 清除大屏標註線條</button>
+      <button class="action-btn stop-btn" onclick="clearCanvas()">🧹 清除大屏畫筆標註</button>
     </div>
 
     <!-- 4. 無線麥克風 -->
@@ -120,11 +124,11 @@
     let peerConnection = null;
     const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
-    // 頁籤切換
     window.switchTab = function(tabId, btn) {
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
       btn.classList.add('active');
+      document.getElementById(tabId).classList.active = true;
       document.getElementById(tabId).classList.add('active');
       if(tabId === 'draw-tab') resizeDrawPad();
     };
@@ -138,7 +142,55 @@
     };
     window.quickSend = function(url) { document.getElementById('url-input').value = url; window.sendUrl(url); };
 
-    // 2. WebRTC (無線鏡頭/麥克風)
+    // 2. 拍照推送到大屏核心邏輯
+    window.pushSnapshotToScreen = function() {
+      const screenId = getScreenId(); if (!screenId) return;
+      const video = document.getElementById('local-preview');
+      if (!video || !video.srcObject) return;
+
+      // 產生高解析度圖檔 (最大 1280px 寬高，維持高畫質又省流量)
+      const canvas = document.createElement('canvas');
+      let w = video.videoWidth || 1280, h = video.videoHeight || 720;
+      const maxDim = 1280;
+      if (w > maxDim || h > maxDim) {
+        if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
+        else { w = Math.round((w * maxDim) / h); h = maxDim; }
+      }
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(video, 0, 0, w, h);
+      
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.75); // JPEG 品質 0.75
+
+      // 關閉 WebRTC 視訊流以節省連線，將照片傳到大屏
+      stopWebRTC();
+
+      // 清空舊的畫筆標註，並載入新照片
+      remove(ref(db, `screens/${screenId}/drawEvents`));
+      set(ref(db, 'screens/' + screenId), {
+        mode: 'photo',
+        photoUrl: dataUrl,
+        updatedAt: Date.now()
+      }).then(() => {
+        if (confirm('✓ 照片已推送到大屏！是否立刻切換到「畫筆標註」進行批改？')) {
+          document.getElementById('draw-tab-btn').click();
+        }
+      });
+    };
+
+    // 本地拍照下載
+    window.takeLocalSnapshot = function() {
+      const video = document.getElementById('local-preview');
+      if (!video || !video.srcObject) return;
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth || 1280; canvas.height = video.videoHeight || 720;
+      canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+      const a = document.createElement('a');
+      a.href = canvas.toDataURL('image/jpeg', 0.95);
+      a.download = `photo_${Date.now()}.jpg`;
+      a.click();
+    };
+
+    // 3. WebRTC 啟動與停止
     window.startWebRTC = async function(type) {
       const screenId = getScreenId(); if (!screenId) return;
       try {
@@ -150,7 +202,6 @@
         localStream = await navigator.mediaDevices.getUserMedia(constraints);
         peerConnection = new RTCPeerConnection(rtcConfig);
 
-        // 綁定手機端預覽
         if (type === 'camera') {
           const preview = document.getElementById('local-preview');
           preview.srcObject = localStream;
@@ -181,31 +232,14 @@
     };
 
     window.stopWebRTC = function() {
-      const screenId = getScreenId();
       if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
       if (peerConnection) { peerConnection.close(); peerConnection = null; }
-      if (screenId) set(ref(db, 'screens/' + screenId), { mode: 'idle' });
       document.getElementById('preview-box').style.display = 'none';
       toggleMediaUI('camera', false);
       toggleMediaUI('mic', false);
     };
 
-    // 3. 拍照下載功能
-    window.takeSnapshot = function() {
-      const video = document.getElementById('local-preview');
-      if (!video || !video.srcObject) return;
-      const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth || 1280;
-      canvas.height = video.videoHeight || 720;
-      canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
-      
-      const a = document.createElement('a');
-      a.href = canvas.toDataURL('image/jpeg', 0.95);
-      a.download = `snapshot_${Date.now()}.jpg`;
-      a.click();
-    };
-
-    // 4. 手機畫筆繪製觸控邏輯
+    // 4. 手機畫筆板邏輯
     const pad = document.getElementById('draw-pad');
     const pCtx = pad.getContext('2d');
     let drawing = false, lastX = 0, lastY = 0, currentColor = '#ff3b30';
@@ -233,7 +267,6 @@
       const currentX = touch.clientX - rect.left;
       const currentY = touch.clientY - rect.top;
 
-      // 在手機上畫
       pCtx.beginPath();
       pCtx.moveTo(lastX, lastY);
       pCtx.lineTo(currentX, currentY);
@@ -242,7 +275,6 @@
       pCtx.lineCap = 'round';
       pCtx.stroke();
 
-      // 將歸一化座標 (0~1) 傳給 Firebase 同步至大屏
       push(ref(db, `screens/${screenId}/drawEvents`), {
         x0: lastX / pad.width, y0: lastY / pad.height,
         x1: currentX / pad.width, y1: currentY / pad.height,
