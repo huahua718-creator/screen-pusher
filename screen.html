@@ -79,7 +79,7 @@
     const mobileUrl = `${window.location.origin}/mobile.html?id=${screenId}`;
     new QRCode(document.getElementById("qrcode"), { text: mobileUrl, width: 200, height: 200 });
 
-    // 初始化畫筆圖層
+    // 初始化全螢幕畫筆圖層
     const canvas = document.getElementById('annotation-canvas');
     const ctx = canvas.getContext('2d');
     function resizeCanvas() {
@@ -93,7 +93,7 @@
     let peerConnection = null;
     const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
-    // 1. 監聽模式與內容變更
+    // 1. 監聽模式變更
     onValue(screenRef, async (snapshot) => {
       const data = snapshot.val();
       if (!data) return;
@@ -103,7 +103,6 @@
         showView('iframe');
         document.getElementById('iframe-view').src = data.url;
       } else if (data.mode === 'photo' && data.photoUrl) {
-        // 照片推送模式
         closeWebRTC();
         showView('photo');
         document.getElementById('photo-view').src = data.photoUrl;
@@ -116,7 +115,7 @@
       }
     });
 
-    // 2. 實時監聽畫筆繪製數據
+    // 2. 實時繪製手機傳來的畫筆數據
     const drawEventsRef = ref(db, `screens/${screenId}/drawEvents`);
     onChildAdded(drawEventsRef, (snapshot) => {
       const d = snapshot.val();
@@ -148,7 +147,7 @@
       };
       peerConnection.onicecandidate = (event) => {
         if (event.candidate) {
-          push(ref(db, `screens/${screenId}/calleeCandidates`), event.candidate.toJSON());
+          push(ref(db, `screens/${screenId}/callerCandidates`), event.candidate.toJSON());
         }
       };
       await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
