@@ -9,20 +9,23 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body, html { width: 100%; height: 100%; overflow: hidden; font-family: sans-serif; background: #000; color: #fff; }
     
-    /* 待機畫面 */
+    /* 1. 待機畫面 */
     #qrcode-view { display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100%; text-align: center; }
     .pin-code { font-size: 4rem; font-weight: bold; color: #4dabf7; letter-spacing: 5px; margin: 10px 0; }
     #qrcode { background: #fff; padding: 15px; border-radius: 12px; margin: 15px 0; }
     
-    /* 網址內嵌畫面 */
+    /* 2. 網址內嵌畫面 */
     #iframe-view { display: none; width: 100%; height: 100%; border: none; }
     
-    /* 實況影音容器 */
+    /* 3. 靜態照片畫面 */
+    #photo-view { display: none; width: 100%; height: 100%; object-fit: contain; background: #000; }
+
+    /* 4. 實況影音容器 */
     #video-container { display: none; width: 100%; height: 100%; position: relative; background: #000; }
     #remote-video { width: 100%; height: 100%; object-fit: contain; }
     .live-badge { position: absolute; top: 20px; left: 20px; background: rgba(255, 59, 48, 0.9); color: white; padding: 6px 14px; border-radius: 20px; font-weight: bold; font-size: 0.9rem; z-index: 10; }
     
-    /* 全螢幕透明畫筆圖層 */
+    /* 最上層透明畫筆標註層 (z-index: 99) */
     #annotation-canvas { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 99; }
 
     #reset-btn { position: fixed; bottom: 20px; right: 20px; z-index: 999; background: rgba(0,0,0,0.8); color: white; border: 1px solid #555; padding: 10px 20px; border-radius: 20px; cursor: pointer; display: none; }
@@ -36,13 +39,14 @@
     <p style="color: #aaa; margin-top: 5px;">大屏連線配對碼</p>
     <div class="pin-code" id="pin-display">------</div>
     <div id="qrcode"></div>
-    <p>請用手機掃描 QR Code 進行【投屏 / 實物鏡頭 / 畫筆標註】</p>
+    <p>請用手機掃描 QR Code 進行【投屏 / 拍照推送 / 畫筆標註】</p>
   </div>
 
   <iframe id="iframe-view" src="about:blank"></iframe>
+  <img id="photo-view" src="" alt="推送的照片">
 
   <div id="video-container">
-    <div class="live-badge" id="stream-type-tag">🔴 實力傳輸中</div>
+    <div class="live-badge" id="stream-type-tag">🔴 實況傳輸中</div>
     <video id="remote-video" autoplay playsinline controls></video>
   </div>
 
@@ -89,7 +93,7 @@
     let peerConnection = null;
     const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
-    // 1. 監聽模式變更
+    // 1. 監聽模式與內容變更
     onValue(screenRef, async (snapshot) => {
       const data = snapshot.val();
       if (!data) return;
@@ -98,6 +102,11 @@
         closeWebRTC();
         showView('iframe');
         document.getElementById('iframe-view').src = data.url;
+      } else if (data.mode === 'photo' && data.photoUrl) {
+        // 照片推送模式
+        closeWebRTC();
+        showView('photo');
+        document.getElementById('photo-view').src = data.photoUrl;
       } else if (data.mode === 'webrtc' && data.offer) {
         showView('video');
         document.getElementById('stream-type-tag').innerText = data.mediaType === 'mic' ? '🎙️ 無線麥克風廣播中' : '🎥 無線實物鏡頭中';
@@ -122,7 +131,6 @@
       }
     });
 
-    // 清空畫筆監聽
     onValue(drawEventsRef, (snapshot) => {
       if (!snapshot.exists()) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -167,6 +175,7 @@
     function showView(type) {
       document.getElementById('qrcode-view').style.display = 'none';
       document.getElementById('iframe-view').style.display = type === 'iframe' ? 'block' : 'none';
+      document.getElementById('photo-view').style.display = type === 'photo' ? 'block' : 'none';
       document.getElementById('video-container').style.display = type === 'video' ? 'block' : 'none';
       document.getElementById('reset-btn').style.display = 'block';
     }
@@ -175,7 +184,9 @@
       closeWebRTC();
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       document.getElementById('iframe-view').src = "about:blank";
+      document.getElementById('photo-view').src = "";
       document.getElementById('iframe-view').style.display = 'none';
+      document.getElementById('photo-view').style.display = 'none';
       document.getElementById('video-container').style.display = 'none';
       document.getElementById('qrcode-view').style.display = 'flex';
       document.getElementById('reset-btn').style.display = 'none';
