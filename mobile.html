@@ -23,9 +23,21 @@
     .btn-group { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
     .btn-sub { background: #e5e5ea; color: #000; flex: 1; min-width: 45%; padding: 10px; border: none; border-radius: 8px; font-size: 0.85rem; }
 
-    #draw-pad { width: 100%; height: 260px; background: #1c1c1e; border-radius: 8px; touch-action: none; cursor: crosshair; }
+    /* 手機畫筆面板：支援自動顯示拍下的照片背景 */
+    #draw-pad { 
+      width: 100%; 
+      height: 320px; 
+      background-color: #1c1c1e; 
+      background-size: contain; 
+      background-repeat: no-repeat; 
+      background-position: center; 
+      border-radius: 8px; 
+      touch-action: none; 
+      cursor: crosshair; 
+      border: 1px solid #ddd;
+    }
     .color-picker { display: flex; gap: 10px; margin: 10px 0; }
-    .color-btn { width: 32px; height: 32px; border-radius: 50%; border: 2px solid #fff; cursor: pointer; }
+    .color-btn { width: 32px; height: 32px; border-radius: 50%; border: 2px solid #fff; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.2); }
   </style>
 </head>
 <body>
@@ -78,9 +90,9 @@
       <button id="cam-stop-btn" class="action-btn stop-btn" style="display:none;" onclick="stopWebRTC()">關閉手機鏡頭</button>
     </div>
 
-    <!-- 3. 畫筆標註 -->
+    <!-- 3. 畫筆標註 (自動呈現拍照背景) -->
     <div id="draw-tab" class="tab-content card">
-      <label>在大屏畫面上劃線標註（可用於批改作業）：</label>
+      <label id="draw-status-label">在下方畫布上手指滑動，大屏同步繪製：</label>
       <canvas id="draw-pad"></canvas>
       
       <div class="color-picker">
@@ -91,7 +103,10 @@
         <div class="color-btn" style="background:#ffffff;" onclick="setColor('#ffffff')"></div>
       </div>
 
-      <button class="action-btn stop-btn" onclick="clearCanvas()">🧹 清除大屏畫筆標註</button>
+      <div style="display: flex; gap: 8px;">
+        <button class="action-btn stop-btn" style="flex: 1;" onclick="clearCanvas()">🧹 清除畫筆線條</button>
+        <button class="action-btn" style="flex: 1; background:#8e8e93;" onclick="clearPhotoBackground()">🖼️ 移除背景照片</button>
+      </div>
     </div>
 
     <!-- 4. 無線麥克風 -->
@@ -122,15 +137,15 @@
 
     let localStream = null;
     let peerConnection = null;
+    let currentPhotoUrl = null; // 紀錄最新推播的照片 DataURL
     const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
     window.switchTab = function(tabId, btn) {
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
       btn.classList.add('active');
-      document.getElementById(tabId).classList.active = true;
       document.getElementById(tabId).classList.add('active');
-      if(tabId === 'draw-tab') resizeDrawPad();
+      if (tabId === 'draw-tab') resizeDrawPad();
     };
 
     // 1. 網址推送
@@ -142,13 +157,12 @@
     };
     window.quickSend = function(url) { document.getElementById('url-input').value = url; window.sendUrl(url); };
 
-    // 2. 拍照推送到大屏核心邏輯
+    // 2. 拍照推送到大屏並將照片自動同步設為手機畫布背景
     window.pushSnapshotToScreen = function() {
       const screenId = getScreenId(); if (!screenId) return;
       const video = document.getElementById('local-preview');
       if (!video || !video.srcObject) return;
 
-      // 產生高解析度圖檔 (最大 1280px 寬高，維持高畫質又省流量)
       const canvas = document.createElement('canvas');
       let w = video.videoWidth || 1280, h = video.videoHeight || 720;
       const maxDim = 1280;
@@ -159,22 +173,43 @@
       canvas.width = w; canvas.height = h;
       canvas.getContext('2d').drawImage(video, 0, 0, w, h);
       
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.75); // JPEG 品質 0.75
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
+      currentPhotoUrl = dataUrl;
 
-      // 關閉 WebRTC 視訊流以節省連線，將照片傳到大屏
+      // 關閉 WebRTC 鏡頭串流
       stopWebRTC();
 
-      // 清空舊的畫筆標註，並載入新照片
+      // 設定手機端畫布背景照片
+      setPadBackground(dataUrl);
+
+      // 清空舊的畫筆標註，將新照片傳給大屏
       remove(ref(db, `screens/${screenId}/drawEvents`));
       set(ref(db, 'screens/' + screenId), {
         mode: 'photo',
         photoUrl: dataUrl,
         updatedAt: Date.now()
       }).then(() => {
-        if (confirm('✓ 照片已推送到大屏！是否立刻切換到「畫筆標註」進行批改？')) {
-          document.getElementById('draw-tab-btn').click();
-        }
+        // 自動幫老師切換到畫筆標註分頁，體驗最流暢
+        document.getElementById('draw-tab-btn').click();
       });
+    };
+
+    // 設定畫布背景照片
+    function setPadBackground(url) {
+      const pad = document.getElementById('draw-pad');
+      if (url) {
+        pad.style.backgroundImage = `url(${url})`;
+        document.getElementById('draw-status-label').innerText = '📸 已載入照片，請直接在照片上方圈寫標註：';
+      } else {
+        pad.style.backgroundImage = 'none';
+        document.getElementById('draw-status-label').innerText = '在下方畫布上手指滑動，大屏同步繪製：';
+      }
+    }
+
+    // 移除畫布背景照片
+    window.clearPhotoBackground = function() {
+      currentPhotoUrl = null;
+      setPadBackground(null);
     };
 
     // 本地拍照下載
@@ -239,14 +274,17 @@
       toggleMediaUI('mic', false);
     };
 
-    // 4. 手機畫筆板邏輯
+    // 4. 手機畫筆板繪製邏輯
     const pad = document.getElementById('draw-pad');
     const pCtx = pad.getContext('2d');
     let drawing = false, lastX = 0, lastY = 0, currentColor = '#ff3b30';
 
     function resizeDrawPad() {
-      pad.width = pad.clientWidth;
-      pad.height = pad.clientHeight;
+      // 避免重置 dimensions 導致已劃線條被擦除
+      if (pad.width !== pad.clientWidth || pad.height !== pad.clientHeight) {
+        pad.width = pad.clientWidth;
+        pad.height = pad.clientHeight;
+      }
     }
 
     window.setColor = function(color) { currentColor = color; };
