@@ -20,18 +20,20 @@
     button.action-btn { width: 100%; padding: 12px; background: #007aff; color: white; border: none; border-radius: 8px; font-size: 1rem; font-weight: bold; cursor: pointer; margin-top: 5px; }
     button.push-btn { background: #34c759; }
     button.stop-btn { background: #ff3b30; }
-    .btn-group { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
-    .btn-sub { background: #e5e5ea; color: #000; flex: 1; min-width: 45%; padding: 10px; border: none; border-radius: 8px; font-size: 0.85rem; }
 
+    /* 手機畫筆畫布：支援顯示背景圖片 */
     #draw-pad { 
       width: 100%; height: 320px; background-color: #1c1c1e; background-size: contain; 
       background-repeat: no-repeat; background-position: center; border-radius: 8px; 
       touch-action: none; cursor: crosshair; border: 1px solid #ddd;
     }
-    .color-picker { display: flex; gap: 10px; margin: 10px 0; }
-    .color-btn { width: 32px; height: 32px; border-radius: 50%; border: 2px solid #fff; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.2); }
+    
+    .tool-bar { display: flex; gap: 8px; align-items: center; margin: 10px 0; flex-wrap: wrap; }
+    .color-btn { width: 30px; height: 30px; border-radius: 50%; border: 2px solid #fff; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.2); }
+    .tool-btn { padding: 6px 12px; border-radius: 20px; border: 1px solid #ccc; background: #f0f0f5; font-size: 0.85rem; font-weight: bold; cursor: pointer; }
+    .tool-btn.active { background: #ff9500; color: white; border-color: #ff9500; }
 
-    /* 全螢幕鏡頭與懸浮選單樣式 */
+    /* 全螢幕鏡頭與懸浮選單 */
     #camera-fullscreen-overlay { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #000; z-index: 9999; }
     #local-preview { width: 100%; height: 100%; object-fit: cover; }
     #live-draw-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; touch-action: none; pointer-events: none; }
@@ -47,13 +49,13 @@
 <body>
 
   <div style="padding: 5px;">
-    <!-- 大屏房間碼 -->
+    <!-- 大屏房間碼卡片 -->
     <div class="card">
       <label for="room-input">大屏房間碼 (PIN)：</label>
       <input type="text" id="room-input" placeholder="例如：839201">
     </div>
 
-    <!-- 模式選擇分頁 -->
+    <!-- 功能分頁選單 -->
     <div class="nav-tabs">
       <button class="tab-btn active" onclick="switchTab('url-tab', this)">網址推送</button>
       <button class="tab-btn" id="cam-tab-btn" onclick="switchTab('camera-tab', this)">鏡頭與相冊</button>
@@ -61,54 +63,47 @@
       <button class="tab-btn" onclick="switchTab('mic-tab', this)">麥克風</button>
     </div>
 
-    <!-- 1. 網址推送 -->
+    <!-- 1. 網址推送頁籤 -->
     <div id="url-tab" class="tab-content active card">
       <label>貼上網址或 YouTube 連結：</label>
       <input type="url" id="url-input" placeholder="https://example.com">
       <button class="action-btn" onclick="sendUrl()">推送至大屏</button>
-
-      <div style="margin-top: 15px;">
-        <label>常用快捷頁面</label>
-        <div class="btn-group">
-          <button class="btn-sub" onclick="quickSend('https://your-app.com/?role=schedule')">今日課表</button>
-          <button class="btn-sub" onclick="quickSend('')" style="color:red;">清空大屏</button>
-        </div>
-      </div>
     </div>
 
-    <!-- 2. 無線鏡頭與相冊推送 -->
+    <!-- 2. 無線鏡頭與相冊推送頁籤 -->
     <div id="camera-tab" class="tab-content card">
-      <label>影像推送方式：</label>
+      <label>選擇影像推送方式：</label>
 
-      <!-- 新增：選擇手機內建相冊照片 -->
-      <button class="action-btn" style="background: #5856d6; margin-bottom: 12px;" onclick="document.getElementById('gallery-input').click()">🖼️ 選擇手機相片推送到大屏</button>
+      <button class="action-btn" style="background: #5856d6; margin-bottom: 12px;" onclick="document.getElementById('gallery-input').click()">🖼️ 選擇手機相冊照片推送到大屏</button>
       <input type="file" id="gallery-input" accept="image/*" style="display:none;" onchange="handleGallerySelect(event)">
 
       <p style="font-size: 0.8rem; color: #8e8e93; text-align: center; margin: 5px 0 10px 0;">— 或 —</p>
 
-      <button id="cam-start-btn" class="action-btn push-btn" onclick="startWebRTC('camera')">🎥 開啟手機全螢幕鏡頭投屏</button>
+      <button id="cam-start-btn" class="action-btn push-btn" onclick="startWebRTC('camera')">🎥 開啟手機全螢幕實時鏡頭</button>
     </div>
 
-    <!-- 3. 畫筆標註 -->
+    <!-- 3. 畫筆標註頁籤 (含橡皮擦工具) -->
     <div id="draw-tab" class="tab-content card">
-      <label id="draw-status-label">在下方畫布上手指滑動，大屏同步繪製：</label>
+      <label id="draw-status-label">在畫布上手指滑動標註，大屏同步繪製：</label>
       <canvas id="draw-pad"></canvas>
       
-      <div class="color-picker">
-        <div class="color-btn" style="background:#ff3b30;" onclick="setColor('#ff3b30')"></div>
-        <div class="color-btn" style="background:#ffcc00;" onclick="setColor('#ffcc00')"></div>
-        <div class="color-btn" style="background:#34c759;" onclick="setColor('#34c759')"></div>
-        <div class="color-btn" style="background:#007aff;" onclick="setColor('#007aff')"></div>
-        <div class="color-btn" style="background:#ffffff;" onclick="setColor('#ffffff')"></div>
+      <!-- 畫筆顏色與橡皮擦選擇列 -->
+      <div class="tool-bar">
+        <div class="color-btn" style="background:#ff3b30;" onclick="selectPen('#ff3b30')"></div>
+        <div class="color-btn" style="background:#ffcc00;" onclick="selectPen('#ffcc00')"></div>
+        <div class="color-btn" style="background:#34c759;" onclick="selectPen('#34c759')"></div>
+        <div class="color-btn" style="background:#007aff;" onclick="selectPen('#007aff')"></div>
+        <div class="color-btn" style="background:#ffffff;" onclick="selectPen('#ffffff')"></div>
+        <button class="tool-btn" id="eraser-btn" onclick="toggleEraser()">🧹 橡皮擦</button>
       </div>
 
       <div style="display: flex; gap: 8px;">
-        <button class="action-btn stop-btn" style="flex: 1;" onclick="clearCanvas()">🧹 清除畫筆線條</button>
+        <button class="action-btn stop-btn" style="flex: 1;" onclick="clearCanvas()">🧹 清除畫筆筆蹟</button>
         <button class="action-btn" style="flex: 1; background:#8e8e93;" onclick="clearPhotoBackground()">🖼️ 移除背景照片</button>
       </div>
     </div>
 
-    <!-- 4. 無線麥克風 -->
+    <!-- 4. 無線麥克風頁籤 -->
     <div id="mic-tab" class="tab-content card">
       <p style="font-size: 0.85rem; color: #666; margin-bottom: 10px;">聲音由大屏喇叭即時播報</p>
       <button id="mic-start-btn" class="action-btn" onclick="startWebRTC('mic')">開啟無線麥克風</button>
@@ -116,25 +111,24 @@
     </div>
   </div>
 
-  <!-- 全螢幕鏡頭與懸浮工具選單 Overlay -->
+  <!-- 全螢幕鏡頭與懸浮工具選單 -->
   <div id="camera-fullscreen-overlay">
     <video id="local-preview" autoplay playsinline muted></video>
     <canvas id="live-draw-canvas"></canvas>
 
-    <!-- 懸浮控制工具列 -->
     <div class="floating-bar">
       <button class="float-btn" style="background:#34c759;" onclick="pushSnapshotToScreen()">🚀 拍照推送</button>
       <button class="float-btn" id="live-draw-btn" style="background:#007aff;" onclick="toggleLiveDraw()">✏️ 畫筆標註</button>
       <button class="float-btn" style="background:#ff3b30;" onclick="stopWebRTC()">❌ 關閉鏡頭</button>
     </div>
 
-    <!-- 實時畫筆顏色懸浮選擇欄 -->
-    <div id="live-color-bar" class="color-picker" style="display:none; position:absolute; top:20px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.7); padding:8px 15px; border-radius:25px; z-index:10001;">
-      <div class="color-btn" style="background:#ff3b30;" onclick="setColor('#ff3b30')"></div>
-      <div class="color-btn" style="background:#ffcc00;" onclick="setColor('#ffcc00')"></div>
-      <div class="color-btn" style="background:#34c759;" onclick="setColor('#34c759')"></div>
-      <div class="color-btn" style="background:#007aff;" onclick="setColor('#007aff')"></div>
-      <div class="color-btn" style="background:#ffffff;" onclick="setColor('#ffffff')"></div>
+    <div id="live-color-bar" class="tool-bar" style="display:none; position:absolute; top:20px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.75); padding:8px 15px; border-radius:25px; z-index:10001;">
+      <div class="color-btn" style="background:#ff3b30;" onclick="selectPen('#ff3b30')"></div>
+      <div class="color-btn" style="background:#ffcc00;" onclick="selectPen('#ffcc00')"></div>
+      <div class="color-btn" style="background:#34c759;" onclick="selectPen('#34c759')"></div>
+      <div class="color-btn" style="background:#007aff;" onclick="selectPen('#007aff')"></div>
+      <div class="color-btn" style="background:#ffffff;" onclick="selectPen('#ffffff')"></div>
+      <button class="tool-btn" id="live-eraser-btn" onclick="toggleEraser()">🧹 橡皮擦</button>
     </div>
   </div>
 
@@ -147,7 +141,6 @@
       authDomain: "screen-pusher.firebaseapp.com",
       databaseURL: "https://screen-pusher-default-rtdb.asia-southeast1.firebasedatabase.app/",
       projectId: "screen-pusher"
-
     };
 
     const app = initializeApp(firebaseConfig);
@@ -159,6 +152,8 @@
     let localStream = null;
     let peerConnection = null;
     let isLiveDrawing = false;
+    let isEraserMode = false;
+    let currentColor = '#ff3b30';
     const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
     window.switchTab = function(tabId, btn) {
@@ -170,13 +165,12 @@
     };
 
     // 1. 網址推送
-    window.sendUrl = function(targetUrl) {
+    window.sendUrl = function() {
       const screenId = getScreenId(); if (!screenId) return;
       stopWebRTC();
-      const url = targetUrl !== undefined ? targetUrl : document.getElementById('url-input').value.trim();
+      const url = document.getElementById('url-input').value.trim();
       set(ref(db, 'screens/' + screenId), { mode: 'url', url: url, updatedAt: Date.now() });
     };
-    window.quickSend = function(url) { document.getElementById('url-input').value = url; window.sendUrl(url); };
 
     // 2. 推送手機相冊照片
     window.handleGallerySelect = function(e) {
@@ -210,7 +204,7 @@
       reader.readAsDataURL(file);
     };
 
-    // 3. 拍照推送到大屏
+    // 3. 拍照定格推送到大屏
     window.pushSnapshotToScreen = function() {
       const screenId = getScreenId(); if (!screenId) return;
       const video = document.getElementById('local-preview');
@@ -248,7 +242,7 @@
 
     window.clearPhotoBackground = function() { setPadBackground(null); };
 
-    // 4. 全螢幕 WebRTC 與懸浮控制
+    // 4. WebRTC 全螢幕實時鏡頭
     window.startWebRTC = async function(type) {
       const screenId = getScreenId(); if (!screenId) return;
       try {
@@ -300,7 +294,6 @@
       toggleMediaUI('camera', false); toggleMediaUI('mic', false);
     };
 
-    // 懸浮畫筆切換
     window.toggleLiveDraw = function() {
       isLiveDrawing = !isLiveDrawing;
       const liveCanvas = document.getElementById('live-draw-canvas');
@@ -320,12 +313,26 @@
       }
     };
 
-    // 5. 畫筆與觸控處理 (雙畫布通用)
+    // 5. 畫筆與橡皮擦切換邏輯
+    window.selectPen = function(color) {
+      isEraserMode = false;
+      currentColor = color;
+      document.getElementById('eraser-btn').classList.remove('active');
+      document.getElementById('live-eraser-btn').classList.remove('active');
+    };
+
+    window.toggleEraser = function() {
+      isEraserMode = !isEraserMode;
+      document.getElementById('eraser-btn').classList.toggle('active', isEraserMode);
+      document.getElementById('live-eraser-btn').classList.toggle('active', isEraserMode);
+    };
+
+    // 6. 手機畫布雙向繪製處理
     const pad = document.getElementById('draw-pad');
     const pCtx = pad.getContext('2d');
     const liveCanvas = document.getElementById('live-draw-canvas');
     const lCtx = liveCanvas.getContext('2d');
-    let drawing = false, lastX = 0, lastY = 0, currentColor = '#ff3b30';
+    let drawing = false, lastX = 0, lastY = 0;
 
     function resizeDrawPad() {
       if (pad.width !== pad.clientWidth || pad.height !== pad.clientHeight) {
@@ -338,9 +345,7 @@
       liveCanvas.height = window.innerHeight;
     }
 
-    window.setColor = function(color) { currentColor = color; };
-
-    function handleStart(e, targetCtx, targetElement) {
+    function handleStart(e, targetElement) {
       drawing = true;
       const rect = targetElement.getBoundingClientRect();
       const touch = e.touches ? e.touches[0] : e;
@@ -359,15 +364,26 @@
       targetCtx.beginPath();
       targetCtx.moveTo(lastX, lastY);
       targetCtx.lineTo(currentX, currentY);
-      targetCtx.strokeStyle = currentColor;
-      targetCtx.lineWidth = 3;
+      
+      if (isEraserMode) {
+        targetCtx.globalCompositeOperation = 'destination-out';
+        targetCtx.lineWidth = 20;
+      } else {
+        targetCtx.globalCompositeOperation = 'source-over';
+        targetCtx.strokeStyle = currentColor;
+        targetCtx.lineWidth = 3;
+      }
+
       targetCtx.lineCap = 'round';
       targetCtx.stroke();
+      targetCtx.globalCompositeOperation = 'source-over';
 
       push(ref(db, `screens/${screenId}/drawEvents`), {
         x0: lastX / targetElement.width, y0: lastY / targetElement.height,
         x1: currentX / targetElement.width, y1: currentY / targetElement.height,
-        color: currentColor, size: 4
+        color: currentColor,
+        size: isEraserMode ? 20 : 4,
+        isEraser: isEraserMode
       });
 
       lastX = currentX; lastY = currentY;
@@ -375,19 +391,17 @@
 
     function handleEnd() { drawing = false; }
 
-    // 獨立分頁畫布綁定
-    pad.addEventListener('touchstart', e => handleStart(e, pCtx, pad));
+    pad.addEventListener('touchstart', e => handleStart(e, pad));
     pad.addEventListener('touchmove', e => handleMove(e, pCtx, pad));
     pad.addEventListener('touchend', handleEnd);
-    pad.addEventListener('mousedown', e => handleStart(e, pCtx, pad));
+    pad.addEventListener('mousedown', e => handleStart(e, pad));
     pad.addEventListener('mousemove', e => handleMove(e, pCtx, pad));
     pad.addEventListener('mouseup', handleEnd);
 
-    // 全螢幕懸浮鏡頭畫布綁定
-    liveCanvas.addEventListener('touchstart', e => handleStart(e, lCtx, liveCanvas));
+    liveCanvas.addEventListener('touchstart', e => handleStart(e, liveCanvas));
     liveCanvas.addEventListener('touchmove', e => handleMove(e, lCtx, liveCanvas));
     liveCanvas.addEventListener('touchend', handleEnd);
-    liveCanvas.addEventListener('mousedown', e => handleStart(e, lCtx, liveCanvas));
+    liveCanvas.addEventListener('mousedown', e => handleStart(e, liveCanvas));
     liveCanvas.addEventListener('mousemove', e => handleMove(e, lCtx, liveCanvas));
     liveCanvas.addEventListener('mouseup', handleEnd);
 
@@ -407,8 +421,8 @@
     function toggleMediaUI(type, isRunning) {
       const startBtn = document.getElementById(type === 'camera' ? 'cam-start-btn' : 'mic-start-btn');
       const stopBtn = document.getElementById(type === 'camera' ? 'cam-stop-btn' : 'mic-stop-btn');
-      startBtn.style.display = isRunning ? 'none' : 'block';
-      stopBtn.style.display = isRunning ? 'block' : 'none';
+      if (startBtn) startBtn.style.display = isRunning ? 'none' : 'block';
+      if (stopBtn) stopBtn.style.display = isRunning ? 'block' : 'none';
     }
   </script>
 </body>
