@@ -9,23 +9,32 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body, html { width: 100%; height: 100%; overflow: hidden; font-family: sans-serif; background: #000; color: #fff; }
     
+    /* 1. 待機 QR Code 畫面 */
     #qrcode-view { display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100%; text-align: center; }
     .pin-code { font-size: 4rem; font-weight: bold; color: #4dabf7; letter-spacing: 5px; margin: 10px 0; }
     #qrcode { background: #fff; padding: 15px; border-radius: 12px; margin: 15px 0; }
     
+    /* 2. 網址內嵌畫面 */
     #iframe-view { display: none; width: 100%; height: 100%; border: none; }
+    
+    /* 3. 靜態照片/相冊畫面 */
     #photo-view { display: none; width: 100%; height: 100%; object-fit: contain; background: #000; }
 
+    /* 4. 實況影音容器 */
     #video-container { display: none; width: 100%; height: 100%; position: relative; background: #000; }
     #remote-video { width: 100%; height: 100%; object-fit: contain; }
     .live-badge { position: absolute; top: 20px; left: 20px; background: rgba(255, 59, 48, 0.9); color: white; padding: 6px 14px; border-radius: 20px; font-weight: bold; font-size: 0.9rem; z-index: 10; }
     
+    /* 最上層透明畫筆標註層 (z-index: 99) */
     #annotation-canvas { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 99; }
+
+    /* 重置浮動按鈕 */
     #reset-btn { position: fixed; bottom: 20px; right: 20px; z-index: 999; background: rgba(0,0,0,0.8); color: white; border: 1px solid #555; padding: 10px 20px; border-radius: 20px; cursor: pointer; display: none; }
   </style>
 </head>
 <body>
 
+  <!-- 待機 QR Code 畫面 -->
   <div id="qrcode-view">
     <h2>班務大屏傳屏助手</h2>
     <p style="color: #aaa; margin-top: 5px;">大屏連線配對碼</p>
@@ -34,6 +43,7 @@
     <p>請用手機掃描 QR Code 進行【網址推送 / 相冊照片 / 鏡頭 / 標註】</p>
   </div>
 
+  <!-- 各模式容器 -->
   <iframe id="iframe-view" src="about:blank"></iframe>
   <img id="photo-view" src="" alt="推送的照片">
 
@@ -42,24 +52,27 @@
     <video id="remote-video" autoplay playsinline controls></video>
   </div>
 
+  <!-- 透明畫筆標註層 (最上層) -->
   <canvas id="annotation-canvas"></canvas>
+
   <button id="reset-btn" onclick="resetScreen()">結束並返回待機</button>
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
     import { getDatabase, ref, onValue, set, push, onChildAdded, remove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
-    // ⚠️ 貼上您的 Firebase 配置
+    // 完整的 Firebase 設定 (保留您原有的 screen-pusher 配置)
     const firebaseConfig = {
-      apiKey: "YOUR_API_KEY",
-      authDomain: "YOUR_PROJECT.firebaseapp.com",
-      databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
-      projectId: "YOUR_PROJECT"
+      apiKey: "AIzaSyBWa8b0rQl-qj-IWjP5hZntEi4ud_cOeVA",
+      authDomain: "screen-pusher.firebaseapp.com",
+      databaseURL: "https://screen-pusher-default-rtdb.asia-southeast1.firebasedatabase.app/",
+      projectId: "screen-pusher"
     };
 
     const app = initializeApp(firebaseConfig);
     const db = getDatabase(app);
 
+    // 取得或自動產生 6 位數配對碼
     const urlParams = new URLSearchParams(window.location.search);
     let screenId = urlParams.get('id') || Math.floor(100000 + Math.random() * 900000).toString();
     window.history.replaceState(null, '', `?id=${screenId}`);
@@ -68,9 +81,13 @@
     const mobileUrl = `${window.location.origin}/mobile.html?id=${screenId}`;
     new QRCode(document.getElementById("qrcode"), { text: mobileUrl, width: 200, height: 200 });
 
+    // 初始化與自適應畫筆 Canvas
     const canvas = document.getElementById('annotation-canvas');
     const ctx = canvas.getContext('2d');
-    function resizeCanvas() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
 
@@ -78,15 +95,18 @@
     let peerConnection = null;
     const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
+    // 1. 監聽狀態與模式切換 (網址 / 照片 / WebRTC 影音 / 待機)
     onValue(screenRef, async (snapshot) => {
       const data = snapshot.val();
       if (!data) return;
 
       if (data.mode === 'url' && data.url) {
-        closeWebRTC(); showView('iframe');
+        closeWebRTC();
+        showView('iframe');
         document.getElementById('iframe-view').src = data.url;
       } else if (data.mode === 'photo' && data.photoUrl) {
-        closeWebRTC(); showView('photo');
+        closeWebRTC();
+        showView('photo');
         document.getElementById('photo-view').src = data.photoUrl;
       } else if (data.mode === 'webrtc' && data.offer) {
         showView('video');
@@ -97,6 +117,7 @@
       }
     });
 
+    // 2. 實時接收並繪製手機端傳來的畫筆數據
     const drawEventsRef = ref(db, `screens/${screenId}/drawEvents`);
     onChildAdded(drawEventsRef, (snapshot) => {
       const d = snapshot.val();
@@ -111,27 +132,40 @@
       }
     });
 
+    // 清空畫筆監聽
     onValue(drawEventsRef, (snapshot) => {
-      if (!snapshot.exists()) ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (!snapshot.exists()) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
     });
 
+    // 3. WebRTC P2P 影音傳送處理
     async function handleWebRTCOffer(offer) {
       if (peerConnection) return;
       peerConnection = new RTCPeerConnection(rtcConfig);
+      
       peerConnection.ontrack = (event) => {
         const remoteVideo = document.getElementById('remote-video');
-        if (remoteVideo.srcObject !== event.streams[0]) remoteVideo.srcObject = event.streams[0];
+        if (remoteVideo.srcObject !== event.streams[0]) {
+          remoteVideo.srcObject = event.streams[0];
+        }
       };
+
       peerConnection.onicecandidate = (event) => {
-        if (event.candidate) push(ref(db, `screens/${screenId}/calleeCandidates`), event.candidate.toJSON());
+        if (event.candidate) {
+          push(ref(db, `screens/${screenId}/calleeCandidates`), event.candidate.toJSON());
+        }
       };
+
       await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
       set(ref(db, `screens/${screenId}/answer`), { type: answer.type, sdp: answer.sdp });
 
       onChildAdded(ref(db, `screens/${screenId}/callerCandidates`), (snapshot) => {
-        if (snapshot.val()) peerConnection.addIceCandidate(new RTCIceCandidate(snapshot.val()));
+        if (snapshot.val()) {
+          peerConnection.addIceCandidate(new RTCIceCandidate(snapshot.val()));
+        }
       });
     }
 
