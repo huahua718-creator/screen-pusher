@@ -2,140 +2,65 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>傳屏遙控器</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>大屏多功能接收端</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <style>
-    body { font-family: sans-serif; padding: 12px; background: #f2f2f7; color: #333; margin: 0; }
-    .card { background: white; padding: 16px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); margin-bottom: 12px; }
-    label { font-size: 0.85rem; color: #666; font-weight: bold; display: block; margin-bottom: 6px; }
-    input { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 8px; margin-bottom: 10px; box-sizing: border-box; font-size: 1rem; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body, html { width: 100%; height: 100%; overflow: hidden; font-family: sans-serif; background: #000; color: #fff; position: relative; }
     
-    .nav-tabs { display: flex; gap: 4px; margin-bottom: 12px; }
-    .tab-btn { flex: 1; padding: 10px 2px; font-size: 0.8rem; border: none; background: #e5e5ea; border-radius: 8px; font-weight: bold; cursor: pointer; }
-    .tab-btn.active { background: #007aff; color: white; }
+    /* 1. 待機 QR Code 畫面 */
+    #qrcode-view { display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100%; text-align: center; }
+    .pin-code { font-size: 4rem; font-weight: bold; color: #4dabf7; letter-spacing: 5px; margin: 10px 0; }
+    #qrcode { background: #fff; padding: 15px; border-radius: 12px; margin: 15px 0; }
     
-    .tab-content { display: none; }
-    .tab-content.active { display: block; }
-    
-    button.action-btn { width: 100%; padding: 12px; background: #007aff; color: white; border: none; border-radius: 8px; font-size: 1rem; font-weight: bold; cursor: pointer; margin-top: 5px; }
-    button.push-btn { background: #34c759; }
-    button.stop-btn { background: #ff3b30; }
-
-    /* 手機畫筆畫布：支援顯示背景圖片 */
-    #draw-pad { 
-      width: 100%; height: 320px; background-color: #1c1c1e; background-size: contain; 
-      background-repeat: no-repeat; background-position: center; border-radius: 8px; 
-      touch-action: none; cursor: crosshair; border: 1px solid #ddd;
+    /* 2. 容器通用全螢幕定位 (修正無法顯示問題) */
+    #iframe-view, #photo-view, #video-container { 
+      display: none; position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; border: none; background: #000; z-index: 10;
     }
     
-    .tool-bar { display: flex; gap: 8px; align-items: center; margin: 10px 0; flex-wrap: wrap; }
-    .color-btn { width: 30px; height: 30px; border-radius: 50%; border: 2px solid #fff; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.2); }
-    .tool-btn { padding: 6px 12px; border-radius: 20px; border: 1px solid #ccc; background: #f0f0f5; font-size: 0.85rem; font-weight: bold; cursor: pointer; }
-    .tool-btn.active { background: #ff9500; color: white; border-color: #ff9500; }
-
-    /* 全螢幕鏡頭與懸浮選單 */
-    #camera-fullscreen-overlay { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #000; z-index: 9999; }
-    #local-preview { width: 100%; height: 100%; object-fit: cover; }
-    #live-draw-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; touch-action: none; pointer-events: none; }
+    #photo-view { object-fit: contain; }
+    #remote-video { width: 100%; height: 100%; object-fit: contain; }
+    .live-badge { position: absolute; top: 20px; left: 20px; background: rgba(255, 59, 48, 0.9); color: white; padding: 6px 14px; border-radius: 20px; font-weight: bold; font-size: 0.9rem; z-index: 20; }
     
-    .floating-bar { 
-      position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); 
-      display: flex; gap: 8px; background: rgba(0,0,0,0.75); padding: 8px 12px; 
-      border-radius: 30px; backdrop-filter: blur(10px); z-index: 10001;
-    }
-    .float-btn { border: none; padding: 10px 14px; border-radius: 20px; font-size: 0.85rem; font-weight: bold; color: white; cursor: pointer; }
+    /* 最上層透明畫筆標註層 (z-index: 99) */
+    #annotation-canvas { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 99; }
+
+    /* 重置浮動按鈕 */
+    #reset-btn { position: fixed; bottom: 20px; right: 20px; z-index: 999; background: rgba(0,0,0,0.8); color: white; border: 1px solid #555; padding: 10px 20px; border-radius: 20px; cursor: pointer; display: none; }
   </style>
 </head>
 <body>
 
-  <div style="padding: 5px;">
-    <!-- 大屏房間碼卡片 -->
-    <div class="card">
-      <label for="room-input">大屏房間碼 (PIN)：</label>
-      <input type="text" id="room-input" placeholder="例如：839201">
-    </div>
-
-    <!-- 功能分頁選單 -->
-    <div class="nav-tabs">
-      <button class="tab-btn active" onclick="switchTab('url-tab', this)">網址推送</button>
-      <button class="tab-btn" id="cam-tab-btn" onclick="switchTab('camera-tab', this)">鏡頭與相冊</button>
-      <button class="tab-btn" id="draw-tab-btn" onclick="switchTab('draw-tab', this)">畫筆標註</button>
-      <button class="tab-btn" onclick="switchTab('mic-tab', this)">麥克風</button>
-    </div>
-
-    <!-- 1. 網址推送頁籤 -->
-    <div id="url-tab" class="tab-content active card">
-      <label>貼上網址或 YouTube 連結：</label>
-      <input type="url" id="url-input" placeholder="https://example.com">
-      <button class="action-btn" onclick="sendUrl()">推送至大屏</button>
-    </div>
-
-    <!-- 2. 無線鏡頭與相冊推送頁籤 -->
-    <div id="camera-tab" class="tab-content card">
-      <label>選擇影像推送方式：</label>
-
-      <button class="action-btn" style="background: #5856d6; margin-bottom: 12px;" onclick="document.getElementById('gallery-input').click()">🖼️ 選擇手機相冊照片推送到大屏</button>
-      <input type="file" id="gallery-input" accept="image/*" style="display:none;" onchange="handleGallerySelect(event)">
-
-      <p style="font-size: 0.8rem; color: #8e8e93; text-align: center; margin: 5px 0 10px 0;">— 或 —</p>
-
-      <button id="cam-start-btn" class="action-btn push-btn" onclick="startWebRTC('camera')">🎥 開啟手機全螢幕實時鏡頭</button>
-    </div>
-
-    <!-- 3. 畫筆標註頁籤 (含橡皮擦工具) -->
-    <div id="draw-tab" class="tab-content card">
-      <label id="draw-status-label">在畫布上手指滑動標註，大屏同步繪製：</label>
-      <canvas id="draw-pad"></canvas>
-      
-      <!-- 畫筆顏色與橡皮擦選擇列 -->
-      <div class="tool-bar">
-        <div class="color-btn" style="background:#ff3b30;" onclick="selectPen('#ff3b30')"></div>
-        <div class="color-btn" style="background:#ffcc00;" onclick="selectPen('#ffcc00')"></div>
-        <div class="color-btn" style="background:#34c759;" onclick="selectPen('#34c759')"></div>
-        <div class="color-btn" style="background:#007aff;" onclick="selectPen('#007aff')"></div>
-        <div class="color-btn" style="background:#ffffff;" onclick="selectPen('#ffffff')"></div>
-        <button class="tool-btn" id="eraser-btn" onclick="toggleEraser()">🧹 橡皮擦</button>
-      </div>
-
-      <div style="display: flex; gap: 8px;">
-        <button class="action-btn stop-btn" style="flex: 1;" onclick="clearCanvas()">🧹 清除畫筆筆蹟</button>
-        <button class="action-btn" style="flex: 1; background:#8e8e93;" onclick="clearPhotoBackground()">🖼️ 移除背景照片</button>
-      </div>
-    </div>
-
-    <!-- 4. 無線麥克風頁籤 -->
-    <div id="mic-tab" class="tab-content card">
-      <p style="font-size: 0.85rem; color: #666; margin-bottom: 10px;">聲音由大屏喇叭即時播報</p>
-      <button id="mic-start-btn" class="action-btn" onclick="startWebRTC('mic')">開啟無線麥克風</button>
-      <button id="mic-stop-btn" class="action-btn stop-btn" style="display:none;" onclick="stopWebRTC()">關閉麥克風</button>
-    </div>
+  <!-- 待機 QR Code 畫面 -->
+  <div id="qrcode-view">
+    <h2>班務大屏傳屏助手</h2>
+    <p style="color: #aaa; margin-top: 5px;">大屏連線配對碼</p>
+    <div class="pin-code" id="pin-display">------</div>
+    <div id="qrcode"></div>
+    <p>請用手機掃描 QR Code 進行【網址推送 / 相冊照片 / 鏡頭 / 標註】</p>
   </div>
 
-  <!-- 全螢幕鏡頭與懸浮工具選單 -->
-  <div id="camera-fullscreen-overlay">
-    <video id="local-preview" autoplay playsinline muted></video>
-    <canvas id="live-draw-canvas"></canvas>
+  <!-- 各模式顯示容器 -->
+  <iframe id="iframe-view" src="about:blank"></iframe>
+  <img id="photo-view" src="" alt="推送的照片">
 
-    <div class="floating-bar">
-      <button class="float-btn" style="background:#34c759;" onclick="pushSnapshotToScreen()">🚀 拍照推送</button>
-      <button class="float-btn" id="live-draw-btn" style="background:#007aff;" onclick="toggleLiveDraw()">✏️ 畫筆標註</button>
-      <button class="float-btn" style="background:#ff3b30;" onclick="stopWebRTC()">❌ 關閉鏡頭</button>
-    </div>
-
-    <div id="live-color-bar" class="tool-bar" style="display:none; position:absolute; top:20px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.75); padding:8px 15px; border-radius:25px; z-index:10001;">
-      <div class="color-btn" style="background:#ff3b30;" onclick="selectPen('#ff3b30')"></div>
-      <div class="color-btn" style="background:#ffcc00;" onclick="selectPen('#ffcc00')"></div>
-      <div class="color-btn" style="background:#34c759;" onclick="selectPen('#34c759')"></div>
-      <div class="color-btn" style="background:#007aff;" onclick="selectPen('#007aff')"></div>
-      <div class="color-btn" style="background:#ffffff;" onclick="selectPen('#ffffff')"></div>
-      <button class="tool-btn" id="live-eraser-btn" onclick="toggleEraser()">🧹 橡皮擦</button>
-    </div>
+  <div id="video-container">
+    <div class="live-badge" id="stream-type-tag">🔴 實況傳輸中</div>
+    <!-- 加入 muted 屬性避免瀏覽器阻擋影音自動播放 -->
+    <video id="remote-video" autoplay playsinline muted controls></video>
   </div>
+
+  <!-- 透明畫筆標註層 -->
+  <canvas id="annotation-canvas"></canvas>
+
+  <button id="reset-btn" onclick="resetScreen()">結束並返回待機</button>
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getDatabase, ref, set, onValue, push, remove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+    import { getDatabase, ref, onValue, set, push, onChildAdded, remove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
+    // 您的 Firebase 設定
     const firebaseConfig = {
       apiKey: "AIzaSyBWa8b0rQl-qj-IWjP5hZntEi4ud_cOeVA",
       authDomain: "screen-pusher.firebaseapp.com",
@@ -147,283 +72,142 @@
     const db = getDatabase(app);
 
     const urlParams = new URLSearchParams(window.location.search);
-    document.getElementById('room-input').value = urlParams.get('id') || '';
+    let screenId = urlParams.get('id') || Math.floor(100000 + Math.random() * 900000).toString();
+    window.history.replaceState(null, '', `?id=${screenId}`);
 
-    let localStream = null;
+    document.getElementById('pin-display').innerText = screenId;
+    const mobileUrl = `${window.location.origin}/mobile.html?id=${screenId}`;
+    new QRCode(document.getElementById("qrcode"), { text: mobileUrl, width: 200, height: 200 });
+
+    const canvas = document.getElementById('annotation-canvas');
+    const ctx = canvas.getContext('2d');
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    const screenRef = ref(db, 'screens/' + screenId);
     let peerConnection = null;
-    let isLiveDrawing = false;
-    let isEraserMode = false;
-    let currentColor = '#ff3b30';
     const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
-    window.switchTab = function(tabId, btn) {
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-      btn.classList.add('active');
-      document.getElementById(tabId).classList.add('active');
-      if (tabId === 'draw-tab') resizeDrawPad();
-    };
+    // 1. 監聽模式與內容變更
+    onValue(screenRef, async (snapshot) => {
+      const data = snapshot.val();
+      if (!data) return;
 
-    // 1. 網址推送
-    window.sendUrl = function() {
-      const screenId = getScreenId(); if (!screenId) return;
-      stopWebRTC();
-      const url = document.getElementById('url-input').value.trim();
-      set(ref(db, 'screens/' + screenId), { mode: 'url', url: url, updatedAt: Date.now() });
-    };
-
-    // 2. 推送手機相冊照片
-    window.handleGallerySelect = function(e) {
-      const file = e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = function(evt) {
-        const img = new Image();
-        img.onload = function() {
-          const canvas = document.createElement('canvas');
-          let w = img.width, h = img.height, maxDim = 1280;
-          if (w > maxDim || h > maxDim) {
-            if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
-            else { w = Math.round((w * maxDim) / h); h = maxDim; }
-          }
-          canvas.width = w; canvas.height = h;
-          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
-
-          stopWebRTC();
-          setPadBackground(dataUrl);
-
-          const screenId = getScreenId(); if (!screenId) return;
-          remove(ref(db, `screens/${screenId}/drawEvents`));
-          set(ref(db, 'screens/' + screenId), { mode: 'photo', photoUrl: dataUrl, updatedAt: Date.now() }).then(() => {
-            document.getElementById('draw-tab-btn').click();
-          });
-        };
-        img.src = evt.target.result;
-      };
-      reader.readAsDataURL(file);
-    };
-
-    // 3. 拍照定格推送到大屏
-    window.pushSnapshotToScreen = function() {
-      const screenId = getScreenId(); if (!screenId) return;
-      const video = document.getElementById('local-preview');
-      if (!video || !video.srcObject) return;
-
-      const canvas = document.createElement('canvas');
-      let w = video.videoWidth || 1280, h = video.videoHeight || 720, maxDim = 1280;
-      if (w > maxDim || h > maxDim) {
-        if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
-        else { w = Math.round((w * maxDim) / h); h = maxDim; }
+      if (data.mode === 'url' && data.url) {
+        closeWebRTC();
+        showView('iframe');
+        document.getElementById('iframe-view').src = data.url;
+      } else if (data.mode === 'photo' && data.photoUrl) {
+        closeWebRTC();
+        showView('photo');
+        document.getElementById('photo-view').src = data.photoUrl;
+      } else if (data.mode === 'webrtc' && data.offer) {
+        showView('video');
+        document.getElementById('stream-type-tag').innerText = data.mediaType === 'mic' ? '🎙️ 無線麥克風廣播中' : '🎥 無線實物鏡頭中';
+        await handleWebRTCOffer(data.offer);
+      } else if (data.mode === 'idle') {
+        resetUI();
       }
-      canvas.width = w; canvas.height = h;
-      canvas.getContext('2d').drawImage(video, 0, 0, w, h);
-      
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
-      stopWebRTC();
-      setPadBackground(dataUrl);
+    });
 
-      remove(ref(db, `screens/${screenId}/drawEvents`));
-      set(ref(db, 'screens/' + screenId), { mode: 'photo', photoUrl: dataUrl, updatedAt: Date.now() }).then(() => {
-        document.getElementById('draw-tab-btn').click();
-      });
-    };
-
-    function setPadBackground(url) {
-      const pad = document.getElementById('draw-pad');
-      if (url) {
-        pad.style.backgroundImage = `url(${url})`;
-        document.getElementById('draw-status-label').innerText = '📸 已載入照片，請直接在照片上方圈寫標註：';
-      } else {
-        pad.style.backgroundImage = 'none';
-        document.getElementById('draw-status-label').innerText = '在下方畫布上手指滑動，大屏同步繪製：';
-      }
-    }
-
-    window.clearPhotoBackground = function() { setPadBackground(null); };
-
-    // 4. WebRTC 全螢幕實時鏡頭
-    window.startWebRTC = async function(type) {
-      const screenId = getScreenId(); if (!screenId) return;
-      try {
-        remove(ref(db, 'screens/' + screenId));
-        const constraints = type === 'camera' 
-          ? { video: { facingMode: "environment" }, audio: true }
-          : { video: false, audio: true };
-
-        localStream = await navigator.mediaDevices.getUserMedia(constraints);
-        peerConnection = new RTCPeerConnection(rtcConfig);
-
-        if (type === 'camera') {
-          const preview = document.getElementById('local-preview');
-          preview.srcObject = localStream;
-          document.getElementById('camera-fullscreen-overlay').style.display = 'block';
-          resizeLiveCanvas();
+    // 2. 實時繪製與擦除畫筆數據 (支援橡皮擦 destination-out)
+    const drawEventsRef = ref(db, `screens/${screenId}/drawEvents`);
+    onChildAdded(drawEventsRef, (snapshot) => {
+      const d = snapshot.val();
+      if (d) {
+        ctx.beginPath();
+        ctx.moveTo(d.x0 * canvas.width, d.y0 * canvas.height);
+        ctx.lineTo(d.x1 * canvas.width, d.y1 * canvas.height);
+        
+        if (d.isEraser) {
+          ctx.globalCompositeOperation = 'destination-out';
+          ctx.lineWidth = d.size || 20;
+        } else {
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.strokeStyle = d.color;
+          ctx.lineWidth = d.size || 4;
         }
 
-        localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-        peerConnection.onicecandidate = (event) => {
-          if (event.candidate) push(ref(db, `screens/${screenId}/callerCandidates`), event.candidate.toJSON());
-        };
-
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
-
-        set(ref(db, `screens/${screenId}`), {
-          mode: 'webrtc', mediaType: type, offer: { type: offer.type, sdp: offer.sdp }
-        });
-
-        onValue(ref(db, `screens/${screenId}/answer`), (snap) => {
-          const ans = snap.val();
-          if (ans && peerConnection.signalingState !== 'stable') {
-            peerConnection.setRemoteDescription(new RTCSessionDescription(ans));
-          }
-        });
-
-        toggleMediaUI(type, true);
-      } catch (err) { alert('請確保已給予鏡頭/麥克風權限：' + err.message); }
-    };
-
-    window.stopWebRTC = function() {
-      if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
-      if (peerConnection) { peerConnection.close(); peerConnection = null; }
-      document.getElementById('camera-fullscreen-overlay').style.display = 'none';
-      document.getElementById('live-color-bar').style.display = 'none';
-      isLiveDrawing = false;
-      document.getElementById('live-draw-canvas').style.pointerEvents = 'none';
-      toggleMediaUI('camera', false); toggleMediaUI('mic', false);
-    };
-
-    window.toggleLiveDraw = function() {
-      isLiveDrawing = !isLiveDrawing;
-      const liveCanvas = document.getElementById('live-draw-canvas');
-      const liveBtn = document.getElementById('live-draw-btn');
-      const colorBar = document.getElementById('live-color-bar');
-
-      if (isLiveDrawing) {
-        liveCanvas.style.pointerEvents = 'auto';
-        liveBtn.style.background = '#ff9500';
-        liveBtn.innerText = '✏️ 繪圖中';
-        colorBar.style.display = 'flex';
-      } else {
-        liveCanvas.style.pointerEvents = 'none';
-        liveBtn.style.background = '#007aff';
-        liveBtn.innerText = '✏️ 畫筆標註';
-        colorBar.style.display = 'none';
+        ctx.lineCap = 'round';
+        ctx.stroke();
+        ctx.globalCompositeOperation = 'source-over'; // 畫完恢復預設
       }
-    };
+    });
 
-    // 5. 畫筆與橡皮擦切換邏輯
-    window.selectPen = function(color) {
-      isEraserMode = false;
-      currentColor = color;
-      document.getElementById('eraser-btn').classList.remove('active');
-      document.getElementById('live-eraser-btn').classList.remove('active');
-    };
-
-    window.toggleEraser = function() {
-      isEraserMode = !isEraserMode;
-      document.getElementById('eraser-btn').classList.toggle('active', isEraserMode);
-      document.getElementById('live-eraser-btn').classList.toggle('active', isEraserMode);
-    };
-
-    // 6. 手機畫布雙向繪製處理
-    const pad = document.getElementById('draw-pad');
-    const pCtx = pad.getContext('2d');
-    const liveCanvas = document.getElementById('live-draw-canvas');
-    const lCtx = liveCanvas.getContext('2d');
-    let drawing = false, lastX = 0, lastY = 0;
-
-    function resizeDrawPad() {
-      if (pad.width !== pad.clientWidth || pad.height !== pad.clientHeight) {
-        pad.width = pad.clientWidth; pad.height = pad.clientHeight;
+    onValue(drawEventsRef, (snapshot) => {
+      if (!snapshot.exists()) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
       }
-    }
+    });
 
-    function resizeLiveCanvas() {
-      liveCanvas.width = window.innerWidth;
-      liveCanvas.height = window.innerHeight;
-    }
-
-    function handleStart(e, targetElement) {
-      drawing = true;
-      const rect = targetElement.getBoundingClientRect();
-      const touch = e.touches ? e.touches[0] : e;
-      lastX = touch.clientX - rect.left;
-      lastY = touch.clientY - rect.top;
-    }
-
-    function handleMove(e, targetCtx, targetElement) {
-      if (!drawing) return;
-      const screenId = getScreenId(); if (!screenId) return;
-      const rect = targetElement.getBoundingClientRect();
-      const touch = e.touches ? e.touches[0] : e;
-      const currentX = touch.clientX - rect.left;
-      const currentY = touch.clientY - rect.top;
-
-      targetCtx.beginPath();
-      targetCtx.moveTo(lastX, lastY);
-      targetCtx.lineTo(currentX, currentY);
+    async function handleWebRTCOffer(offer) {
+      if (peerConnection) return;
+      peerConnection = new RTCPeerConnection(rtcConfig);
       
-      if (isEraserMode) {
-        targetCtx.globalCompositeOperation = 'destination-out';
-        targetCtx.lineWidth = 20;
-      } else {
-        targetCtx.globalCompositeOperation = 'source-over';
-        targetCtx.strokeStyle = currentColor;
-        targetCtx.lineWidth = 3;
-      }
+      peerConnection.ontrack = (event) => {
+        const remoteVideo = document.getElementById('remote-video');
+        if (remoteVideo.srcObject !== event.streams[0]) {
+          remoteVideo.srcObject = event.streams[0];
+          remoteVideo.play().catch(e => console.log("Autoplay:", e));
+        }
+      };
 
-      targetCtx.lineCap = 'round';
-      targetCtx.stroke();
-      targetCtx.globalCompositeOperation = 'source-over';
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+          push(ref(db, `screens/${screenId}/calleeCandidates`), event.candidate.toJSON());
+        }
+      };
 
-      push(ref(db, `screens/${screenId}/drawEvents`), {
-        x0: lastX / targetElement.width, y0: lastY / targetElement.height,
-        x1: currentX / targetElement.width, y1: currentY / targetElement.height,
-        color: currentColor,
-        size: isEraserMode ? 20 : 4,
-        isEraser: isEraserMode
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answer);
+      set(ref(db, `screens/${screenId}/answer`), { type: answer.type, sdp: answer.sdp });
+
+      onChildAdded(ref(db, `screens/${screenId}/callerCandidates`), (snapshot) => {
+        if (snapshot.val()) {
+          peerConnection.addIceCandidate(new RTCIceCandidate(snapshot.val()));
+        }
       });
-
-      lastX = currentX; lastY = currentY;
     }
 
-    function handleEnd() { drawing = false; }
+    function closeWebRTC() {
+      if (peerConnection) { peerConnection.close(); peerConnection = null; }
+      const remoteVideo = document.getElementById('remote-video');
+      if (remoteVideo.srcObject) {
+        remoteVideo.srcObject.getTracks().forEach(track => track.stop());
+        remoteVideo.srcObject = null;
+      }
+    }
 
-    pad.addEventListener('touchstart', e => handleStart(e, pad));
-    pad.addEventListener('touchmove', e => handleMove(e, pCtx, pad));
-    pad.addEventListener('touchend', handleEnd);
-    pad.addEventListener('mousedown', e => handleStart(e, pad));
-    pad.addEventListener('mousemove', e => handleMove(e, pCtx, pad));
-    pad.addEventListener('mouseup', handleEnd);
+    function showView(type) {
+      document.getElementById('qrcode-view').style.display = 'none';
+      document.getElementById('iframe-view').style.display = type === 'iframe' ? 'block' : 'none';
+      document.getElementById('photo-view').style.display = type === 'photo' ? 'block' : 'none';
+      document.getElementById('video-container').style.display = type === 'video' ? 'block' : 'none';
+      document.getElementById('reset-btn').style.display = 'block';
+    }
 
-    liveCanvas.addEventListener('touchstart', e => handleStart(e, liveCanvas));
-    liveCanvas.addEventListener('touchmove', e => handleMove(e, lCtx, liveCanvas));
-    liveCanvas.addEventListener('touchend', handleEnd);
-    liveCanvas.addEventListener('mousedown', e => handleStart(e, liveCanvas));
-    liveCanvas.addEventListener('mousemove', e => handleMove(e, lCtx, liveCanvas));
-    liveCanvas.addEventListener('mouseup', handleEnd);
+    function resetUI() {
+      closeWebRTC();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      document.getElementById('iframe-view').src = "about:blank";
+      document.getElementById('photo-view').src = "";
+      document.getElementById('iframe-view').style.display = 'none';
+      document.getElementById('photo-view').style.display = 'none';
+      document.getElementById('video-container').style.display = 'none';
+      document.getElementById('qrcode-view').style.display = 'flex';
+      document.getElementById('reset-btn').style.display = 'none';
+    }
 
-    window.clearCanvas = function() {
-      const screenId = getScreenId(); if (!screenId) return;
-      pCtx.clearRect(0, 0, pad.width, pad.height);
-      lCtx.clearRect(0, 0, liveCanvas.width, liveCanvas.height);
-      remove(ref(db, `screens/${screenId}/drawEvents`));
+    window.resetScreen = function() {
+      remove(screenRef);
+      set(screenRef, { mode: 'idle' });
+      resetUI();
     };
-
-    function getScreenId() {
-      const id = document.getElementById('room-input').value.trim();
-      if (!id) alert('請先輸入大屏房間碼！');
-      return id;
-    }
-
-    function toggleMediaUI(type, isRunning) {
-      const startBtn = document.getElementById(type === 'camera' ? 'cam-start-btn' : 'mic-start-btn');
-      const stopBtn = document.getElementById(type === 'camera' ? 'cam-stop-btn' : 'mic-stop-btn');
-      if (startBtn) startBtn.style.display = isRunning ? 'none' : 'block';
-      if (stopBtn) stopBtn.style.display = isRunning ? 'block' : 'none';
-    }
   </script>
 </body>
 </html>
