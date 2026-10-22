@@ -23,21 +23,25 @@
     .btn-group { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
     .btn-sub { background: #e5e5ea; color: #000; flex: 1; min-width: 45%; padding: 10px; border: none; border-radius: 8px; font-size: 0.85rem; }
 
-    /* 手機畫筆面板：支援自動顯示拍下的照片背景 */
     #draw-pad { 
-      width: 100%; 
-      height: 320px; 
-      background-color: #1c1c1e; 
-      background-size: contain; 
-      background-repeat: no-repeat; 
-      background-position: center; 
-      border-radius: 8px; 
-      touch-action: none; 
-      cursor: crosshair; 
-      border: 1px solid #ddd;
+      width: 100%; height: 320px; background-color: #1c1c1e; background-size: contain; 
+      background-repeat: no-repeat; background-position: center; border-radius: 8px; 
+      touch-action: none; cursor: crosshair; border: 1px solid #ddd;
     }
     .color-picker { display: flex; gap: 10px; margin: 10px 0; }
     .color-btn { width: 32px; height: 32px; border-radius: 50%; border: 2px solid #fff; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.2); }
+
+    /* 全螢幕鏡頭與懸浮選單樣式 */
+    #camera-fullscreen-overlay { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #000; z-index: 9999; }
+    #local-preview { width: 100%; height: 100%; object-fit: cover; }
+    #live-draw-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; touch-action: none; pointer-events: none; }
+    
+    .floating-bar { 
+      position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); 
+      display: flex; gap: 8px; background: rgba(0,0,0,0.75); padding: 8px 12px; 
+      border-radius: 30px; backdrop-filter: blur(10px); z-index: 10001;
+    }
+    .float-btn { border: none; padding: 10px 14px; border-radius: 20px; font-size: 0.85rem; font-weight: bold; color: white; cursor: pointer; }
   </style>
 </head>
 <body>
@@ -52,7 +56,7 @@
     <!-- 模式選擇分頁 -->
     <div class="nav-tabs">
       <button class="tab-btn active" onclick="switchTab('url-tab', this)">網址推送</button>
-      <button class="tab-btn" id="cam-tab-btn" onclick="switchTab('camera-tab', this)">鏡頭與拍照</button>
+      <button class="tab-btn" id="cam-tab-btn" onclick="switchTab('camera-tab', this)">鏡頭與相冊</button>
       <button class="tab-btn" id="draw-tab-btn" onclick="switchTab('draw-tab', this)">畫筆標註</button>
       <button class="tab-btn" onclick="switchTab('mic-tab', this)">麥克風</button>
     </div>
@@ -72,25 +76,20 @@
       </div>
     </div>
 
-    <!-- 2. 無線鏡頭與拍照推送 -->
+    <!-- 2. 無線鏡頭與相冊推送 -->
     <div id="camera-tab" class="tab-content card">
-      <p style="font-size: 0.85rem; color: #666; margin-bottom: 10px;">可進行【實時動態投屏】或【拍照定格推送到大屏】</p>
-      
-      <!-- 手機端鏡頭預覽 -->
-      <div id="preview-box" style="display:none; margin-bottom: 10px;">
-        <video id="local-preview" autoplay playsinline muted style="width:100%; border-radius:8px; background:#000;"></video>
-        
-        <div style="display: flex; gap: 8px; margin-top: 8px;">
-          <button class="action-btn push-btn" style="flex:1; font-size:0.9rem;" onclick="pushSnapshotToScreen()">🚀 拍照推送到大屏</button>
-          <button class="action-btn" style="flex:1; background:#5856d6; font-size:0.9rem;" onclick="takeLocalSnapshot()">💾 拍照存到手機</button>
-        </div>
-      </div>
+      <label>影像推送方式：</label>
 
-      <button id="cam-start-btn" class="action-btn" onclick="startWebRTC('camera')">開啟手機鏡頭</button>
-      <button id="cam-stop-btn" class="action-btn stop-btn" style="display:none;" onclick="stopWebRTC()">關閉手機鏡頭</button>
+      <!-- 新增：選擇手機內建相冊照片 -->
+      <button class="action-btn" style="background: #5856d6; margin-bottom: 12px;" onclick="document.getElementById('gallery-input').click()">🖼️ 選擇手機相片推送到大屏</button>
+      <input type="file" id="gallery-input" accept="image/*" style="display:none;" onchange="handleGallerySelect(event)">
+
+      <p style="font-size: 0.8rem; color: #8e8e93; text-align: center; margin: 5px 0 10px 0;">— 或 —</p>
+
+      <button id="cam-start-btn" class="action-btn push-btn" onclick="startWebRTC('camera')">🎥 開啟手機全螢幕鏡頭投屏</button>
     </div>
 
-    <!-- 3. 畫筆標註 (自動呈現拍照背景) -->
+    <!-- 3. 畫筆標註 -->
     <div id="draw-tab" class="tab-content card">
       <label id="draw-status-label">在下方畫布上手指滑動，大屏同步繪製：</label>
       <canvas id="draw-pad"></canvas>
@@ -117,6 +116,28 @@
     </div>
   </div>
 
+  <!-- 全螢幕鏡頭與懸浮工具選單 Overlay -->
+  <div id="camera-fullscreen-overlay">
+    <video id="local-preview" autoplay playsinline muted></video>
+    <canvas id="live-draw-canvas"></canvas>
+
+    <!-- 懸浮控制工具列 -->
+    <div class="floating-bar">
+      <button class="float-btn" style="background:#34c759;" onclick="pushSnapshotToScreen()">🚀 拍照推送</button>
+      <button class="float-btn" id="live-draw-btn" style="background:#007aff;" onclick="toggleLiveDraw()">✏️ 畫筆標註</button>
+      <button class="float-btn" style="background:#ff3b30;" onclick="stopWebRTC()">❌ 關閉鏡頭</button>
+    </div>
+
+    <!-- 實時畫筆顏色懸浮選擇欄 -->
+    <div id="live-color-bar" class="color-picker" style="display:none; position:absolute; top:20px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.7); padding:8px 15px; border-radius:25px; z-index:10001;">
+      <div class="color-btn" style="background:#ff3b30;" onclick="setColor('#ff3b30')"></div>
+      <div class="color-btn" style="background:#ffcc00;" onclick="setColor('#ffcc00')"></div>
+      <div class="color-btn" style="background:#34c759;" onclick="setColor('#34c759')"></div>
+      <div class="color-btn" style="background:#007aff;" onclick="setColor('#007aff')"></div>
+      <div class="color-btn" style="background:#ffffff;" onclick="setColor('#ffffff')"></div>
+    </div>
+  </div>
+
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
     import { getDatabase, ref, set, onValue, push, remove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
@@ -137,7 +158,7 @@
 
     let localStream = null;
     let peerConnection = null;
-    let currentPhotoUrl = null; // 紀錄最新推播的照片 DataURL
+    let isLiveDrawing = false;
     const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
     window.switchTab = function(tabId, btn) {
@@ -157,15 +178,46 @@
     };
     window.quickSend = function(url) { document.getElementById('url-input').value = url; window.sendUrl(url); };
 
-    // 2. 拍照推送到大屏並將照片自動同步設為手機畫布背景
+    // 2. 推送手機相冊照片
+    window.handleGallerySelect = function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        const img = new Image();
+        img.onload = function() {
+          const canvas = document.createElement('canvas');
+          let w = img.width, h = img.height, maxDim = 1280;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
+            else { w = Math.round((w * maxDim) / h); h = maxDim; }
+          }
+          canvas.width = w; canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
+
+          stopWebRTC();
+          setPadBackground(dataUrl);
+
+          const screenId = getScreenId(); if (!screenId) return;
+          remove(ref(db, `screens/${screenId}/drawEvents`));
+          set(ref(db, 'screens/' + screenId), { mode: 'photo', photoUrl: dataUrl, updatedAt: Date.now() }).then(() => {
+            document.getElementById('draw-tab-btn').click();
+          });
+        };
+        img.src = evt.target.result;
+      };
+      reader.readAsDataURL(file);
+    };
+
+    // 3. 拍照推送到大屏
     window.pushSnapshotToScreen = function() {
       const screenId = getScreenId(); if (!screenId) return;
       const video = document.getElementById('local-preview');
       if (!video || !video.srcObject) return;
 
       const canvas = document.createElement('canvas');
-      let w = video.videoWidth || 1280, h = video.videoHeight || 720;
-      const maxDim = 1280;
+      let w = video.videoWidth || 1280, h = video.videoHeight || 720, maxDim = 1280;
       if (w > maxDim || h > maxDim) {
         if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
         else { w = Math.round((w * maxDim) / h); h = maxDim; }
@@ -174,27 +226,15 @@
       canvas.getContext('2d').drawImage(video, 0, 0, w, h);
       
       const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
-      currentPhotoUrl = dataUrl;
-
-      // 關閉 WebRTC 鏡頭串流
       stopWebRTC();
-
-      // 設定手機端畫布背景照片
       setPadBackground(dataUrl);
 
-      // 清空舊的畫筆標註，將新照片傳給大屏
       remove(ref(db, `screens/${screenId}/drawEvents`));
-      set(ref(db, 'screens/' + screenId), {
-        mode: 'photo',
-        photoUrl: dataUrl,
-        updatedAt: Date.now()
-      }).then(() => {
-        // 自動幫老師切換到畫筆標註分頁，體驗最流暢
+      set(ref(db, 'screens/' + screenId), { mode: 'photo', photoUrl: dataUrl, updatedAt: Date.now() }).then(() => {
         document.getElementById('draw-tab-btn').click();
       });
     };
 
-    // 設定畫布背景照片
     function setPadBackground(url) {
       const pad = document.getElementById('draw-pad');
       if (url) {
@@ -206,26 +246,9 @@
       }
     }
 
-    // 移除畫布背景照片
-    window.clearPhotoBackground = function() {
-      currentPhotoUrl = null;
-      setPadBackground(null);
-    };
+    window.clearPhotoBackground = function() { setPadBackground(null); };
 
-    // 本地拍照下載
-    window.takeLocalSnapshot = function() {
-      const video = document.getElementById('local-preview');
-      if (!video || !video.srcObject) return;
-      const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth || 1280; canvas.height = video.videoHeight || 720;
-      canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
-      const a = document.createElement('a');
-      a.href = canvas.toDataURL('image/jpeg', 0.95);
-      a.download = `photo_${Date.now()}.jpg`;
-      a.click();
-    };
-
-    // 3. WebRTC 啟動與停止
+    // 4. 全螢幕 WebRTC 與懸浮控制
     window.startWebRTC = async function(type) {
       const screenId = getScreenId(); if (!screenId) return;
       try {
@@ -240,7 +263,8 @@
         if (type === 'camera') {
           const preview = document.getElementById('local-preview');
           preview.srcObject = localStream;
-          document.getElementById('preview-box').style.display = 'block';
+          document.getElementById('camera-fullscreen-overlay').style.display = 'block';
+          resizeLiveCanvas();
         }
 
         localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
@@ -269,53 +293,80 @@
     window.stopWebRTC = function() {
       if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
       if (peerConnection) { peerConnection.close(); peerConnection = null; }
-      document.getElementById('preview-box').style.display = 'none';
-      toggleMediaUI('camera', false);
-      toggleMediaUI('mic', false);
+      document.getElementById('camera-fullscreen-overlay').style.display = 'none';
+      document.getElementById('live-color-bar').style.display = 'none';
+      isLiveDrawing = false;
+      document.getElementById('live-draw-canvas').style.pointerEvents = 'none';
+      toggleMediaUI('camera', false); toggleMediaUI('mic', false);
     };
 
-    // 4. 手機畫筆板繪製邏輯
+    // 懸浮畫筆切換
+    window.toggleLiveDraw = function() {
+      isLiveDrawing = !isLiveDrawing;
+      const liveCanvas = document.getElementById('live-draw-canvas');
+      const liveBtn = document.getElementById('live-draw-btn');
+      const colorBar = document.getElementById('live-color-bar');
+
+      if (isLiveDrawing) {
+        liveCanvas.style.pointerEvents = 'auto';
+        liveBtn.style.background = '#ff9500';
+        liveBtn.innerText = '✏️ 繪圖中';
+        colorBar.style.display = 'flex';
+      } else {
+        liveCanvas.style.pointerEvents = 'none';
+        liveBtn.style.background = '#007aff';
+        liveBtn.innerText = '✏️ 畫筆標註';
+        colorBar.style.display = 'none';
+      }
+    };
+
+    // 5. 畫筆與觸控處理 (雙畫布通用)
     const pad = document.getElementById('draw-pad');
     const pCtx = pad.getContext('2d');
+    const liveCanvas = document.getElementById('live-draw-canvas');
+    const lCtx = liveCanvas.getContext('2d');
     let drawing = false, lastX = 0, lastY = 0, currentColor = '#ff3b30';
 
     function resizeDrawPad() {
-      // 避免重置 dimensions 導致已劃線條被擦除
       if (pad.width !== pad.clientWidth || pad.height !== pad.clientHeight) {
-        pad.width = pad.clientWidth;
-        pad.height = pad.clientHeight;
+        pad.width = pad.clientWidth; pad.height = pad.clientHeight;
       }
+    }
+
+    function resizeLiveCanvas() {
+      liveCanvas.width = window.innerWidth;
+      liveCanvas.height = window.innerHeight;
     }
 
     window.setColor = function(color) { currentColor = color; };
 
-    function handleStart(e) {
+    function handleStart(e, targetCtx, targetElement) {
       drawing = true;
-      const rect = pad.getBoundingClientRect();
+      const rect = targetElement.getBoundingClientRect();
       const touch = e.touches ? e.touches[0] : e;
       lastX = touch.clientX - rect.left;
       lastY = touch.clientY - rect.top;
     }
 
-    function handleMove(e) {
+    function handleMove(e, targetCtx, targetElement) {
       if (!drawing) return;
       const screenId = getScreenId(); if (!screenId) return;
-      const rect = pad.getBoundingClientRect();
+      const rect = targetElement.getBoundingClientRect();
       const touch = e.touches ? e.touches[0] : e;
       const currentX = touch.clientX - rect.left;
       const currentY = touch.clientY - rect.top;
 
-      pCtx.beginPath();
-      pCtx.moveTo(lastX, lastY);
-      pCtx.lineTo(currentX, currentY);
-      pCtx.strokeStyle = currentColor;
-      pCtx.lineWidth = 3;
-      pCtx.lineCap = 'round';
-      pCtx.stroke();
+      targetCtx.beginPath();
+      targetCtx.moveTo(lastX, lastY);
+      targetCtx.lineTo(currentX, currentY);
+      targetCtx.strokeStyle = currentColor;
+      targetCtx.lineWidth = 3;
+      targetCtx.lineCap = 'round';
+      targetCtx.stroke();
 
       push(ref(db, `screens/${screenId}/drawEvents`), {
-        x0: lastX / pad.width, y0: lastY / pad.height,
-        x1: currentX / pad.width, y1: currentY / pad.height,
+        x0: lastX / targetElement.width, y0: lastY / targetElement.height,
+        x1: currentX / targetElement.width, y1: currentY / targetElement.height,
         color: currentColor, size: 4
       });
 
@@ -324,16 +375,26 @@
 
     function handleEnd() { drawing = false; }
 
-    pad.addEventListener('touchstart', handleStart);
-    pad.addEventListener('touchmove', handleMove);
+    // 獨立分頁畫布綁定
+    pad.addEventListener('touchstart', e => handleStart(e, pCtx, pad));
+    pad.addEventListener('touchmove', e => handleMove(e, pCtx, pad));
     pad.addEventListener('touchend', handleEnd);
-    pad.addEventListener('mousedown', handleStart);
-    pad.addEventListener('mousemove', handleMove);
+    pad.addEventListener('mousedown', e => handleStart(e, pCtx, pad));
+    pad.addEventListener('mousemove', e => handleMove(e, pCtx, pad));
     pad.addEventListener('mouseup', handleEnd);
+
+    // 全螢幕懸浮鏡頭畫布綁定
+    liveCanvas.addEventListener('touchstart', e => handleStart(e, lCtx, liveCanvas));
+    liveCanvas.addEventListener('touchmove', e => handleMove(e, lCtx, liveCanvas));
+    liveCanvas.addEventListener('touchend', handleEnd);
+    liveCanvas.addEventListener('mousedown', e => handleStart(e, lCtx, liveCanvas));
+    liveCanvas.addEventListener('mousemove', e => handleMove(e, lCtx, liveCanvas));
+    liveCanvas.addEventListener('mouseup', handleEnd);
 
     window.clearCanvas = function() {
       const screenId = getScreenId(); if (!screenId) return;
       pCtx.clearRect(0, 0, pad.width, pad.height);
+      lCtx.clearRect(0, 0, liveCanvas.width, liveCanvas.height);
       remove(ref(db, `screens/${screenId}/drawEvents`));
     };
 
