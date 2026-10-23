@@ -432,6 +432,66 @@
       if (startBtn) startBtn.style.display = isRunning ? 'none' : 'block';
       if (stopBtn) stopBtn.style.display = isRunning ? 'block' : 'none';
     }
+    // ================= 歷史網址紀錄邏輯 =================
+    
+    // 頁面載入完成後自動讀取歷史紀錄
+    document.addEventListener('DOMContentLoaded', () => {
+      loadHistory();
+    });
+
+    // 1. 讀取並渲染歷史紀錄下拉選單
+    function loadHistory() {
+      const history = JSON.parse(localStorage.getItem('pushedUrlHistory') || '[]');
+      const select = document.getElementById('history-select');
+      if (!select) return;
+      select.innerHTML = '<option value="">-- 點擊選擇過往網址 --</option>';
+      
+      history.forEach(url => {
+        const opt = document.createElement('option');
+        opt.value = url;
+        opt.textContent = url.length > 40 ? url.substring(0, 37) + '...' : url;
+        select.appendChild(opt);
+      });
+    }
+
+    // 2. 儲存網址至本地紀錄 (去重 + 最多保留 10 筆)
+    function saveToHistory(url) {
+      if (!url) return;
+      let history = JSON.parse(localStorage.getItem('pushedUrlHistory') || '[]');
+      history = history.filter(item => item !== url);
+      history.unshift(url);
+      if (history.length > 10) history = history.slice(0, 10);
+      localStorage.setItem('pushedUrlHistory', JSON.stringify(history));
+      loadHistory();
+    }
+
+    // 3. 供 HTML 下拉選單調用
+    window.selectHistory = function(url) {
+      if (url) {
+        document.getElementById('url-input').value = url;
+      }
+    };
+
+    // 4. 供 HTML 清空按鈕調用
+    window.clearHistory = function() {
+      if (confirm('確定要清空手機儲存的歷史網址紀錄嗎？')) {
+        localStorage.removeItem('pushedUrlHistory');
+        loadHistory();
+      }
+    };
+
+    // 5. 更新原本的 sendUrl (請確認舊的 window.sendUrl 已被這段取代)
+    window.sendUrl = function() {
+      const screenId = getScreenId(); if (!screenId) return;
+      stopWebRTC();
+      const url = document.getElementById('url-input').value.trim();
+      
+      if (url) {
+        saveToHistory(url); // 儲存至本地歷史紀錄
+      }
+
+      set(ref(db, 'screens/' + screenId), { mode: 'url', url: url, updatedAt: Date.now() });
+    };
   </script>
 </body>
 </html>
