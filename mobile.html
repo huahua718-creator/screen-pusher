@@ -63,15 +63,19 @@
       <button class="tab-btn" onclick="switchTab('mic-tab', this)">麥克風</button>
     </div>
 
-    <!-- 1. 網址推送頁籤 -->
+   <!-- 1. 網址推送頁籤 -->
 <div id="url-tab" class="tab-content active card">
   <label for="url-input">貼上網址或 YouTube 連結：</label>
   <input type="url" id="url-input" placeholder="https://example.com">
 
-  <!-- 🌟 新增：歷史推送紀錄下拉選單 -->
+  <!-- 🌟 新增：自訂名稱輸入框 -->
+  <label for="url-name-input">網址自訂名稱（選填）：</label>
+  <input type="text" id="url-name-input" placeholder="例如：英語課開場影片 / 班務課表">
+
+  <!-- 🌟 新增：歷史選單 -->
   <label for="history-select" style="margin-top: 5px;">歷史推送紀錄：</label>
   <select id="history-select" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #ccc; margin-bottom: 12px; font-size: 0.9rem;" onchange="selectHistory(this.value)">
-    <option value="">-- 點擊選擇過往網址 --</option>
+    <option value="">-- 點擊選擇歷史網址 --</option>
   </select>
 
   <button class="action-btn" onclick="sendUrl()">推送至大屏</button>
@@ -434,64 +438,84 @@
     }
     // ================= 歷史網址紀錄邏輯 =================
     
-    // 頁面載入完成後自動讀取歷史紀錄
-    document.addEventListener('DOMContentLoaded', () => {
-      loadHistory();
-    });
+   // 頁面載入完成後自動讀取歷史紀錄
+document.addEventListener('DOMContentLoaded', () => {
+  loadHistory();
+});
 
-    // 1. 讀取並渲染歷史紀錄下拉選單
-    function loadHistory() {
-      const history = JSON.parse(localStorage.getItem('pushedUrlHistory') || '[]');
-      const select = document.getElementById('history-select');
-      if (!select) return;
-      select.innerHTML = '<option value="">-- 點擊選擇過往網址 --</option>';
-      
-      history.forEach(url => {
-        const opt = document.createElement('option');
-        opt.value = url;
-        opt.textContent = url.length > 40 ? url.substring(0, 37) + '...' : url;
-        select.appendChild(opt);
-      });
+// 1. 讀取並渲染歷史紀錄下拉選單 (支援顯示自訂名稱)
+function loadHistory() {
+  const history = JSON.parse(localStorage.getItem('pushedUrlHistory') || '[]');
+  const select = document.getElementById('history-select');
+  if (!select) return;
+  select.innerHTML = '<option value="">-- 點擊選擇歷史網址 --</option>';
+  
+  history.forEach(item => {
+    const opt = document.createElement('option');
+    // 兼容舊資料 (純字串) 與新資料 (物件)
+    const url = typeof item === 'object' ? item.url : item;
+    const name = (typeof item === 'object' && item.name) ? item.name : url;
+    
+    opt.value = url;
+    opt.dataset.name = (typeof item === 'object' && item.name) ? item.name : '';
+    opt.textContent = name.length > 30 ? name.substring(0, 27) + '...' : name;
+    select.appendChild(opt);
+  });
+}
+
+// 2. 儲存網址與名稱至本地紀錄 (去重 + 最多保留 10 筆)
+function saveToHistory(url, name) {
+  if (!url) return;
+  let history = JSON.parse(localStorage.getItem('pushedUrlHistory') || '[]');
+  
+  // 過濾掉重複的舊 URL 紀錄
+  history = history.filter(item => (typeof item === 'object' ? item.url : item) !== url);
+  
+  // 新增至最新第一筆
+  history.unshift({ url: url, name: name || '' });
+  
+  if (history.length > 10) history = history.slice(0, 10);
+  localStorage.setItem('pushedUrlHistory', JSON.stringify(history));
+  loadHistory();
+}
+
+// 3. 點擊下拉選單帶入「網址」與「自訂名稱」
+window.selectHistory = function(url) {
+  if (url) {
+    document.getElementById('url-input').value = url;
+    const select = document.getElementById('history-select');
+    const selectedOpt = select.options[select.selectedIndex];
+    if (selectedOpt && selectedOpt.dataset.name) {
+      document.getElementById('url-name-input').value = selectedOpt.dataset.name;
+    } else {
+      document.getElementById('url-name-input').value = '';
     }
+  }
+};
 
-    // 2. 儲存網址至本地紀錄 (去重 + 最多保留 10 筆)
-    function saveToHistory(url) {
-      if (!url) return;
-      let history = JSON.parse(localStorage.getItem('pushedUrlHistory') || '[]');
-      history = history.filter(item => item !== url);
-      history.unshift(url);
-      if (history.length > 10) history = history.slice(0, 10);
-      localStorage.setItem('pushedUrlHistory', JSON.stringify(history));
-      loadHistory();
-    }
+// 4. 清空歷史紀錄
+window.clearHistory = function() {
+  if (confirm('確定要清空手機儲存的歷史網址紀錄嗎？')) {
+    localStorage.removeItem('pushedUrlHistory');
+    document.getElementById('url-name-input').value = '';
+    document.getElementById('url-input').value = '';
+    loadHistory();
+  }
+};
 
-    // 3. 供 HTML 下拉選單調用
-    window.selectHistory = function(url) {
-      if (url) {
-        document.getElementById('url-input').value = url;
-      }
-    };
+// 5. 更新 sendUrl 函式 (儲存網址與自訂名稱)
+window.sendUrl = function() {
+  const screenId = getScreenId(); if (!screenId) return;
+  stopWebRTC();
+  const url = document.getElementById('url-input').value.trim();
+  const name = document.getElementById('url-name-input').value.trim();
+  
+  if (url) {
+    saveToHistory(url, name);
+  }
 
-    // 4. 供 HTML 清空按鈕調用
-    window.clearHistory = function() {
-      if (confirm('確定要清空手機儲存的歷史網址紀錄嗎？')) {
-        localStorage.removeItem('pushedUrlHistory');
-        loadHistory();
-      }
-    };
-
-    // 5. 更新原本的 sendUrl (請確認舊的 window.sendUrl 已被這段取代)
-    window.sendUrl = function() {
-      const screenId = getScreenId(); if (!screenId) return;
-      stopWebRTC();
-      const url = document.getElementById('url-input').value.trim();
-      
-      if (url) {
-        saveToHistory(url); // 儲存至本地歷史紀錄
-      }
-
-      set(ref(db, 'screens/' + screenId), { mode: 'url', url: url, updatedAt: Date.now() });
-    };
+  set(ref(db, 'screens/' + screenId), { mode: 'url', url: url, updatedAt: Date.now() });
+};
   </script>
 </body>
 </html>
