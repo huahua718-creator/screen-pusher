@@ -92,27 +92,42 @@
     let peerConnection = null;
     const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
-    // 1. 監聽模式與內容變更
-    onValue(screenRef, async (snapshot) => {
-      const data = snapshot.val();
-      if (!data) return;
+    // 新增：YouTube 網址自動轉換函式
+function formatEmbedUrl(url) {
+  if (!url) return url;
+  
+  // 匹配標準 YouTube 網址、短網址或 Shorts
+  const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/))([\w-]{11})/);
+  if (ytMatch && ytMatch[1]) {
+    // 自動轉為嵌入專用格式，並加上自動播放參數
+    return `https://www.youtube.com/embed/${ytMatch[1]}?autoplay=1`;
+  }
+  return url;
+}
 
-      if (data.mode === 'url' && data.url) {
-        closeWebRTC();
-        showView('iframe');
-        document.getElementById('iframe-view').src = data.url;
-      } else if (data.mode === 'photo' && data.photoUrl) {
-        closeWebRTC();
-        showView('photo');
-        document.getElementById('photo-view').src = data.photoUrl;
-      } else if (data.mode === 'webrtc' && data.offer) {
-        showView('video');
-        document.getElementById('stream-type-tag').innerText = data.mediaType === 'mic' ? '🎙️ 無線麥克風廣播中' : '🎥 無線實物鏡頭中';
-        await handleWebRTCOffer(data.offer);
-      } else if (data.mode === 'idle') {
-        resetUI();
-      }
-    });
+// 1. 監聽模式與內容變更
+onValue(screenRef, async (snapshot) => {
+  const data = snapshot.val();
+  if (!data) return;
+
+  if (data.mode === 'url' && data.url) {
+    closeWebRTC();
+    showView('iframe');
+    
+    // 🌟 將推送過來的網址透過格式化函式處理後再給 iframe 載入
+    document.getElementById('iframe-view').src = formatEmbedUrl(data.url);
+  } else if (data.mode === 'photo' && data.photoUrl) {
+    closeWebRTC();
+    showView('photo');
+    document.getElementById('photo-view').src = data.photoUrl;
+  } else if (data.mode === 'webrtc' && data.offer) {
+    showView('video');
+    document.getElementById('stream-type-tag').innerText = data.mediaType === 'mic' ? '🎙️ 無線麥克風廣播中' : '🎥 無線實物鏡頭中';
+    await handleWebRTCOffer(data.offer);
+  } else if (data.mode === 'idle') {
+    resetUI();
+  }
+});
 
     // 2. 實時繪製與擦除畫筆數據 (支援橡皮擦 destination-out)
     const drawEventsRef = ref(db, `screens/${screenId}/drawEvents`);
