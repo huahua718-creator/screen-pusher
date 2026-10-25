@@ -8,7 +8,7 @@
     body { font-family: sans-serif; padding: 12px; background: #f2f2f7; color: #333; margin: 0; }
     .card { background: white; padding: 16px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); margin-bottom: 12px; }
     label { font-size: 0.85rem; color: #666; font-weight: bold; display: block; margin-bottom: 6px; }
-    input { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 8px; margin-bottom: 10px; box-sizing: border-box; font-size: 1rem; }
+    input, select { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 8px; margin-bottom: 10px; box-sizing: border-box; font-size: 1rem; }
     
     .nav-tabs { display: flex; gap: 4px; margin-bottom: 12px; }
     .tab-btn { flex: 1; padding: 10px 2px; font-size: 0.8rem; border: none; background: #e5e5ea; border-radius: 8px; font-weight: bold; cursor: pointer; }
@@ -21,7 +21,7 @@
     button.push-btn { background: #34c759; }
     button.stop-btn { background: #ff3b30; }
 
-    /* 手機畫筆畫布：支援顯示背景圖片 */
+    /* 手機畫筆畫布：支援動態背景圖片 */
     #draw-pad { 
       width: 100%; height: 320px; background-color: #1c1c1e; background-size: contain; 
       background-repeat: no-repeat; background-position: center; border-radius: 8px; 
@@ -49,48 +49,53 @@
 <body>
 
   <div style="padding: 5px;">
-    <!-- 大屏房間碼卡片 -->
+    <!-- 大屏房間碼 -->
     <div class="card">
       <label for="room-input">大屏房間碼 (PIN)：</label>
       <input type="text" id="room-input" placeholder="例如：839201">
     </div>
 
-    <!-- 功能分頁選單 -->
+    <!-- 模式選擇分頁 -->
     <div class="nav-tabs">
       <button class="tab-btn active" onclick="switchTab('url-tab', this)">網址推送</button>
-      <button class="tab-btn" id="cam-tab-btn" onclick="switchTab('camera-tab', this)">鏡頭與相冊</button>
+      <button class="tab-btn" id="cam-tab-btn" onclick="switchTab('camera-tab', this)">媒體與鏡頭</button>
       <button class="tab-btn" id="draw-tab-btn" onclick="switchTab('draw-tab', this)">畫筆標註</button>
       <button class="tab-btn" onclick="switchTab('mic-tab', this)">麥克風</button>
     </div>
 
-   <!-- 1. 網址推送頁籤 -->
-<div id="url-tab" class="tab-content active card">
-  <label for="url-input">貼上網址或 YouTube 連結：</label>
-  <input type="url" id="url-input" placeholder="https://example.com">
+    <!-- 1. 網址推送頁籤 (含自訂名稱與歷史選單) -->
+    <div id="url-tab" class="tab-content active card">
+      <label for="url-input">貼上網址或 YouTube 連結：</label>
+      <input type="url" id="url-input" placeholder="https://example.com">
 
-  <!-- 🌟 新增：自訂名稱輸入框 -->
-  <label for="url-name-input">網址自訂名稱（選填）：</label>
-  <input type="text" id="url-name-input" placeholder="例如：英語課開場影片 / 班務課表">
+      <label for="url-name-input">網址自訂名稱（選填）：</label>
+      <input type="text" id="url-name-input" placeholder="例如：英語課影片 / 課表">
 
-  <!-- 🌟 新增：歷史選單 -->
-  <label for="history-select" style="margin-top: 5px;">歷史推送紀錄：</label>
-  <select id="history-select" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #ccc; margin-bottom: 12px; font-size: 0.9rem;" onchange="selectHistory(this.value)">
-    <option value="">-- 點擊選擇歷史網址 --</option>
-  </select>
+      <label for="history-select">歷史推送紀錄：</label>
+      <select id="history-select" onchange="selectHistory(this.value)">
+        <option value="">-- 點擊選擇過往歷史網址 --</option>
+      </select>
 
-  <button class="action-btn" onclick="sendUrl()">推送至大屏</button>
-  <button style="width:100%; background:none; border:none; color:#8e8e93; font-size:0.75rem; margin-top:8px; cursor:pointer;" onclick="clearHistory()">清空歷史紀錄</button>
-</div>
+      <button class="action-btn" onclick="sendUrl()">推送至大屏</button>
+      <button style="width:100%; background:none; border:none; color:#8e8e93; font-size:0.75rem; margin-top:8px; cursor:pointer;" onclick="clearHistory()">清空歷史紀錄</button>
+    </div>
 
-    <!-- 2. 無線鏡頭與相冊推送頁籤 -->
+    <!-- 2. 媒體與鏡頭頁籤 (相冊照片、影片檔案、實況鏡頭) -->
     <div id="camera-tab" class="tab-content card">
-      <label>選擇影像推送方式：</label>
+      <label>媒體推送方式：</label>
 
-      <button class="action-btn" style="background: #5856d6; margin-bottom: 12px;" onclick="document.getElementById('gallery-input').click()">🖼️ 選擇手機相冊照片推送到大屏</button>
+      <!-- 照片選取 -->
+      <button class="action-btn" style="background: #5856d6; margin-bottom: 8px;" onclick="document.getElementById('gallery-input').click()">🖼️ 選擇手機相冊照片推送到大屏</button>
       <input type="file" id="gallery-input" accept="image/*" style="display:none;" onchange="handleGallerySelect(event)">
+
+      <!-- 影片檔選取 -->
+      <button class="action-btn" style="background: #ff9500; margin-bottom: 12px;" onclick="document.getElementById('video-file-input').click()">🎬 選擇手機影片檔推送到大屏</button>
+      <input type="file" id="video-file-input" accept="video/*" style="display:none;" onchange="handleVideoFileSelect(event)">
+      <video id="local-video-file" style="display:none;" playsinline loop muted></video>
 
       <p style="font-size: 0.8rem; color: #8e8e93; text-align: center; margin: 5px 0 10px 0;">— 或 —</p>
 
+      <!-- 實況鏡頭 -->
       <button id="cam-start-btn" class="action-btn push-btn" onclick="startWebRTC('camera')">🎥 開啟手機全螢幕實時鏡頭</button>
     </div>
 
@@ -99,7 +104,6 @@
       <label id="draw-status-label">在畫布上手指滑動標註，大屏同步繪製：</label>
       <canvas id="draw-pad"></canvas>
       
-      <!-- 畫筆顏色與橡皮擦選擇列 -->
       <div class="tool-bar">
         <div class="color-btn" style="background:#ff3b30;" onclick="selectPen('#ff3b30')"></div>
         <div class="color-btn" style="background:#ffcc00;" onclick="selectPen('#ffcc00')"></div>
@@ -123,7 +127,7 @@
     </div>
   </div>
 
-  <!-- 全螢幕鏡頭與懸浮工具選單 -->
+  <!-- 全螢幕鏡頭與懸浮工具選單 Overlay -->
   <div id="camera-fullscreen-overlay">
     <video id="local-preview" autoplay playsinline muted></video>
     <canvas id="live-draw-canvas"></canvas>
@@ -168,6 +172,8 @@
     let currentColor = '#ff3b30';
     const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
+    document.addEventListener('DOMContentLoaded', () => { loadHistory(); });
+
     window.switchTab = function(tabId, btn) {
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
@@ -176,15 +182,65 @@
       if (tabId === 'draw-tab') resizeDrawPad();
     };
 
-    // 1. 網址推送
+    // 1. 歷史網址紀錄管理
+    function loadHistory() {
+      const history = JSON.parse(localStorage.getItem('pushedUrlHistory') || '[]');
+      const select = document.getElementById('history-select');
+      if (!select) return;
+      select.innerHTML = '<option value="">-- 點擊選擇過往歷史網址 --</option>';
+      
+      history.forEach(item => {
+        const opt = document.createElement('option');
+        const url = typeof item === 'object' ? item.url : item;
+        const name = (typeof item === 'object' && item.name) ? item.name : url;
+        
+        opt.value = url;
+        opt.dataset.name = (typeof item === 'object' && item.name) ? item.name : '';
+        opt.textContent = name.length > 30 ? name.substring(0, 27) + '...' : name;
+        select.appendChild(opt);
+      });
+    }
+
+    function saveToHistory(url, name) {
+      if (!url) return;
+      let history = JSON.parse(localStorage.getItem('pushedUrlHistory') || '[]');
+      history = history.filter(item => (typeof item === 'object' ? item.url : item) !== url);
+      history.unshift({ url: url, name: name || '' });
+      if (history.length > 10) history = history.slice(0, 10);
+      localStorage.setItem('pushedUrlHistory', JSON.stringify(history));
+      loadHistory();
+    }
+
+    window.selectHistory = function(url) {
+      if (url) {
+        document.getElementById('url-input').value = url;
+        const select = document.getElementById('history-select');
+        const selectedOpt = select.options[select.selectedIndex];
+        document.getElementById('url-name-input').value = (selectedOpt && selectedOpt.dataset.name) ? selectedOpt.dataset.name : '';
+      }
+    };
+
+    window.clearHistory = function() {
+      if (confirm('確定要清空手機儲存的歷史網址紀錄嗎？')) {
+        localStorage.removeItem('pushedUrlHistory');
+        document.getElementById('url-name-input').value = '';
+        document.getElementById('url-input').value = '';
+        loadHistory();
+      }
+    };
+
+    // 2. 網址推送
     window.sendUrl = function() {
       const screenId = getScreenId(); if (!screenId) return;
       stopWebRTC();
       const url = document.getElementById('url-input').value.trim();
+      const name = document.getElementById('url-name-input').value.trim();
+      
+      if (url) saveToHistory(url, name);
       set(ref(db, 'screens/' + screenId), { mode: 'url', url: url, updatedAt: Date.now() });
     };
 
-    // 2. 推送手機相冊照片
+    // 3. 推送相冊照片
     window.handleGallerySelect = function(e) {
       const file = e.target.files[0];
       if (!file) return;
@@ -216,7 +272,48 @@
       reader.readAsDataURL(file);
     };
 
-    // 3. 拍照定格推送到大屏
+    // 4. 推送相冊影片檔 (WebRTC P2P 本地串流)
+    window.handleVideoFileSelect = async function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const screenId = getScreenId(); if (!screenId) return;
+
+      stopWebRTC();
+
+      const videoEl = document.getElementById('local-video-file');
+      videoEl.src = URL.createObjectURL(file);
+      await videoEl.play();
+
+      const stream = videoEl.captureStream ? videoEl.captureStream() : videoEl.mozCaptureStream();
+
+      remove(ref(db, 'screens/' + screenId));
+      peerConnection = new RTCPeerConnection(rtcConfig);
+      stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
+
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate) push(ref(db, `screens/${screenId}/callerCandidates`), event.candidate.toJSON());
+      };
+
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+
+      set(ref(db, `screens/${screenId}`), {
+        mode: 'webrtc',
+        mediaType: 'video-file',
+        offer: { type: offer.type, sdp: offer.sdp }
+      });
+
+      onValue(ref(db, `screens/${screenId}/answer`), (snap) => {
+        const ans = snap.val();
+        if (ans && peerConnection.signalingState !== 'stable') {
+          peerConnection.setRemoteDescription(new RTCSessionDescription(ans));
+        }
+      });
+
+      alert('✓ 手機影片已開始串流推送至大屏！');
+    };
+
+    // 5. 拍照定格推送到大屏
     window.pushSnapshotToScreen = function() {
       const screenId = getScreenId(); if (!screenId) return;
       const video = document.getElementById('local-preview');
@@ -254,7 +351,7 @@
 
     window.clearPhotoBackground = function() { setPadBackground(null); };
 
-    // 4. WebRTC 全螢幕實時鏡頭
+    // 6. WebRTC 實時鏡頭與懸浮選單
     window.startWebRTC = async function(type) {
       const screenId = getScreenId(); if (!screenId) return;
       try {
@@ -299,6 +396,9 @@
     window.stopWebRTC = function() {
       if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
       if (peerConnection) { peerConnection.close(); peerConnection = null; }
+      const videoEl = document.getElementById('local-video-file');
+      if (videoEl) { videoEl.pause(); videoEl.src = ""; }
+
       document.getElementById('camera-fullscreen-overlay').style.display = 'none';
       document.getElementById('live-color-bar').style.display = 'none';
       isLiveDrawing = false;
@@ -325,7 +425,7 @@
       }
     };
 
-    // 5. 畫筆與橡皮擦切換邏輯
+    // 7. 畫筆與橡皮擦選擇
     window.selectPen = function(color) {
       isEraserMode = false;
       currentColor = color;
@@ -339,7 +439,7 @@
       document.getElementById('live-eraser-btn').classList.toggle('active', isEraserMode);
     };
 
-    // 6. 手機畫布雙向繪製處理
+    // 8. 畫布觸控處理
     const pad = document.getElementById('draw-pad');
     const pCtx = pad.getContext('2d');
     const liveCanvas = document.getElementById('live-draw-canvas');
@@ -436,86 +536,6 @@
       if (startBtn) startBtn.style.display = isRunning ? 'none' : 'block';
       if (stopBtn) stopBtn.style.display = isRunning ? 'block' : 'none';
     }
-    // ================= 歷史網址紀錄邏輯 =================
-    
-   // 頁面載入完成後自動讀取歷史紀錄
-document.addEventListener('DOMContentLoaded', () => {
-  loadHistory();
-});
-
-// 1. 讀取並渲染歷史紀錄下拉選單 (支援顯示自訂名稱)
-function loadHistory() {
-  const history = JSON.parse(localStorage.getItem('pushedUrlHistory') || '[]');
-  const select = document.getElementById('history-select');
-  if (!select) return;
-  select.innerHTML = '<option value="">-- 點擊選擇歷史網址 --</option>';
-  
-  history.forEach(item => {
-    const opt = document.createElement('option');
-    // 兼容舊資料 (純字串) 與新資料 (物件)
-    const url = typeof item === 'object' ? item.url : item;
-    const name = (typeof item === 'object' && item.name) ? item.name : url;
-    
-    opt.value = url;
-    opt.dataset.name = (typeof item === 'object' && item.name) ? item.name : '';
-    opt.textContent = name.length > 30 ? name.substring(0, 27) + '...' : name;
-    select.appendChild(opt);
-  });
-}
-
-// 2. 儲存網址與名稱至本地紀錄 (去重 + 最多保留 10 筆)
-function saveToHistory(url, name) {
-  if (!url) return;
-  let history = JSON.parse(localStorage.getItem('pushedUrlHistory') || '[]');
-  
-  // 過濾掉重複的舊 URL 紀錄
-  history = history.filter(item => (typeof item === 'object' ? item.url : item) !== url);
-  
-  // 新增至最新第一筆
-  history.unshift({ url: url, name: name || '' });
-  
-  if (history.length > 10) history = history.slice(0, 10);
-  localStorage.setItem('pushedUrlHistory', JSON.stringify(history));
-  loadHistory();
-}
-
-// 3. 點擊下拉選單帶入「網址」與「自訂名稱」
-window.selectHistory = function(url) {
-  if (url) {
-    document.getElementById('url-input').value = url;
-    const select = document.getElementById('history-select');
-    const selectedOpt = select.options[select.selectedIndex];
-    if (selectedOpt && selectedOpt.dataset.name) {
-      document.getElementById('url-name-input').value = selectedOpt.dataset.name;
-    } else {
-      document.getElementById('url-name-input').value = '';
-    }
-  }
-};
-
-// 4. 清空歷史紀錄
-window.clearHistory = function() {
-  if (confirm('確定要清空手機儲存的歷史網址紀錄嗎？')) {
-    localStorage.removeItem('pushedUrlHistory');
-    document.getElementById('url-name-input').value = '';
-    document.getElementById('url-input').value = '';
-    loadHistory();
-  }
-};
-
-// 5. 更新 sendUrl 函式 (儲存網址與自訂名稱)
-window.sendUrl = function() {
-  const screenId = getScreenId(); if (!screenId) return;
-  stopWebRTC();
-  const url = document.getElementById('url-input').value.trim();
-  const name = document.getElementById('url-name-input').value.trim();
-  
-  if (url) {
-    saveToHistory(url, name);
-  }
-
-  set(ref(db, 'screens/' + screenId), { mode: 'url', url: url, updatedAt: Date.now() });
-};
   </script>
 </body>
 </html>
