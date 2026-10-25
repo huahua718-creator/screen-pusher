@@ -91,7 +91,7 @@
       <!-- 影片檔選取 -->
       <button class="action-btn" style="background: #ff9500; margin-bottom: 12px;" onclick="document.getElementById('video-file-input').click()">🎬 選擇手機影片檔推送到大屏</button>
       <input type="file" id="video-file-input" accept="video/*" style="display:none;" onchange="handleVideoFileSelect(event)">
-      <video id="local-video-file" style="display:none;" playsinline loop muted></video>
+      <video id="local-video-file" playsinline webkit-playsinline loop muted style="position: absolute; top: -9999px; left: -9999px; width: 1px; height: 1px; opacity: 0; pointer-events: none;"></video>
 
       <p style="font-size: 0.8rem; color: #8e8e93; text-align: center; margin: 5px 0 10px 0;">— 或 —</p>
 
@@ -274,44 +274,58 @@
 
     // 4. 推送相冊影片檔 (WebRTC P2P 本地串流)
     window.handleVideoFileSelect = async function(e) {
-      const file = e.target.files[0];
-      if (!file) return;
-      const screenId = getScreenId(); if (!screenId) return;
+  const file = e.target.files[0];
+  if (!file) return;
+  const screenId = getScreenId(); if (!screenId) return;
 
-      stopWebRTC();
+  stopWebRTC();
 
-      const videoEl = document.getElementById('local-video-file');
-      videoEl.src = URL.createObjectURL(file);
-      await videoEl.play();
+  const videoEl = document.getElementById('local-video-file');
+  videoEl.src = URL.createObjectURL(file);
 
-      const stream = videoEl.captureStream ? videoEl.captureStream() : videoEl.mozCaptureStream();
+  try {
+    // 確保影片加載完成並播放
+    await videoEl.play();
 
-      remove(ref(db, 'screens/' + screenId));
-      peerConnection = new RTCPeerConnection(rtcConfig);
-      stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
+    // 🌟 相容 iOS Safari 的 captureStream 語法
+    const captureFn = (videoEl.captureStream || videoEl.webkitCaptureStream || videoEl.mozCaptureStream);
+    if (!captureFn) {
+      alert('您的 iOS Safari 版本不支援此影片串流功能，請嘗試更新 iOS 系統。');
+      return;
+    }
 
-      peerConnection.onicecandidate = (event) => {
-        if (event.candidate) push(ref(db, `screens/${screenId}/callerCandidates`), event.candidate.toJSON());
-      };
+    const stream = captureFn.call(videoEl);
 
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
+    remove(ref(db, 'screens/' + screenId));
+    peerConnection = new RTCPeerConnection(rtcConfig);
 
-      set(ref(db, `screens/${screenId}`), {
-        mode: 'webrtc',
-        mediaType: 'video-file',
-        offer: { type: offer.type, sdp: offer.sdp }
-      });
+    stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
 
-      onValue(ref(db, `screens/${screenId}/answer`), (snap) => {
-        const ans = snap.val();
-        if (ans && peerConnection.signalingState !== 'stable') {
-          peerConnection.setRemoteDescription(new RTCSessionDescription(ans));
-        }
-      });
-
-      alert('✓ 手機影片已開始串流推送至大屏！');
+    peerConnection.onicecandidate = (event) => {
+      if (event.candidate) push(ref(db, `screens/${screenId}/callerCandidates`), event.candidate.toJSON());
     };
+
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+
+    set(ref(db, `screens/${screenId}`), {
+      mode: 'webrtc',
+      mediaType: 'video-file',
+      offer: { type: offer.type, sdp: offer.sdp }
+    });
+
+    onValue(ref(db, `screens/${screenId}/answer`), (snap) => {
+      const ans = snap.val();
+      if (ans && peerConnection.signalingState !== 'stable') {
+        peerConnection.setRemoteDescription(new RTCSessionDescription(ans));
+      }
+    });
+
+    alert('✓ 手機影片已開始串流推送至大屏！');
+  } catch (err) {
+    alert('iOS 影片讀取失敗，請確認影片格式（建議為 MP4）: ' + err.message);
+  }
+};
 
     // 5. 拍照定格推送到大屏
     window.pushSnapshotToScreen = function() {
