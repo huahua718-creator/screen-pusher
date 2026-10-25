@@ -14,7 +14,7 @@
     .pin-code { font-size: 4rem; font-weight: bold; color: #4dabf7; letter-spacing: 5px; margin: 10px 0; }
     #qrcode { background: #fff; padding: 15px; border-radius: 12px; margin: 15px 0; }
     
-    /* 2. 容器通用全螢幕定位 (修正無法顯示問題) */
+    /* 2. 通用全螢幕容器 */
     #iframe-view, #photo-view, #video-container { 
       display: none; position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; border: none; background: #000; z-index: 10;
     }
@@ -38,7 +38,7 @@
     <p style="color: #aaa; margin-top: 5px;">大屏連線配對碼</p>
     <div class="pin-code" id="pin-display">------</div>
     <div id="qrcode"></div>
-    <p>請用手機掃描 QR Code 進行【網址推送 / 相冊照片 / 鏡頭 / 標註】</p>
+    <p>請用手機掃描 QR Code 進行【網址推送 / 影片 / 照片 / 鏡頭 / 標註】</p>
   </div>
 
   <!-- 各模式顯示容器 -->
@@ -47,8 +47,7 @@
 
   <div id="video-container">
     <div class="live-badge" id="stream-type-tag">🔴 實況傳輸中</div>
-    <!-- 加入 muted 屬性避免瀏覽器阻擋影音自動播放 -->
-    <video id="remote-video" autoplay playsinline muted controls></video>
+    <video id="remote-video" autoplay playsinline controls></video>
   </div>
 
   <!-- 透明畫筆標註層 -->
@@ -92,42 +91,41 @@
     let peerConnection = null;
     const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
-    // 新增：YouTube 網址自動轉換函式
-function formatEmbedUrl(url) {
-  if (!url) return url;
-  
-  // 匹配標準 YouTube 網址、短網址或 Shorts
-  const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/))([\w-]{11})/);
-  if (ytMatch && ytMatch[1]) {
-    // 自動轉為嵌入專用格式，並加上自動播放參數
-    return `https://www.youtube.com/embed/${ytMatch[1]}?autoplay=1`;
-  }
-  return url;
-}
+    // YouTube 網址自動轉換為內嵌格式
+    function formatEmbedUrl(url) {
+      if (!url) return url;
+      const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/))([\w-]{11})/);
+      if (ytMatch && ytMatch[1]) {
+        return `https://www.youtube.com/embed/${ytMatch[1]}?autoplay=1`;
+      }
+      return url;
+    }
 
-// 1. 監聽模式與內容變更
-onValue(screenRef, async (snapshot) => {
-  const data = snapshot.val();
-  if (!data) return;
+    // 1. 監聽狀態與模式變更
+    onValue(screenRef, async (snapshot) => {
+      const data = snapshot.val();
+      if (!data) return;
 
-  if (data.mode === 'url' && data.url) {
-    closeWebRTC();
-    showView('iframe');
-    
-    // 🌟 將推送過來的網址透過格式化函式處理後再給 iframe 載入
-    document.getElementById('iframe-view').src = formatEmbedUrl(data.url);
-  } else if (data.mode === 'photo' && data.photoUrl) {
-    closeWebRTC();
-    showView('photo');
-    document.getElementById('photo-view').src = data.photoUrl;
-  } else if (data.mode === 'webrtc' && data.offer) {
-    showView('video');
-    document.getElementById('stream-type-tag').innerText = data.mediaType === 'mic' ? '🎙️ 無線麥克風廣播中' : '🎥 無線實物鏡頭中';
-    await handleWebRTCOffer(data.offer);
-  } else if (data.mode === 'idle') {
-    resetUI();
-  }
-});
+      if (data.mode === 'url' && data.url) {
+        closeWebRTC();
+        showView('iframe');
+        document.getElementById('iframe-view').src = formatEmbedUrl(data.url);
+      } else if (data.mode === 'photo' && data.photoUrl) {
+        closeWebRTC();
+        showView('photo');
+        document.getElementById('photo-view').src = data.photoUrl;
+      } else if (data.mode === 'webrtc' && data.offer) {
+        showView('video');
+        const tag = document.getElementById('stream-type-tag');
+        if (data.mediaType === 'mic') tag.innerText = '🎙️ 無線麥克風廣播中';
+        else if (data.mediaType === 'video-file') tag.innerText = '🎬 手機影片播放中';
+        else tag.innerText = '🎥 無線實物鏡頭中';
+        
+        await handleWebRTCOffer(data.offer, data.mediaType);
+      } else if (data.mode === 'idle') {
+        resetUI();
+      }
+    });
 
     // 2. 實時繪製與擦除畫筆數據 (支援橡皮擦 destination-out)
     const drawEventsRef = ref(db, `screens/${screenId}/drawEvents`);
@@ -149,7 +147,7 @@ onValue(screenRef, async (snapshot) => {
 
         ctx.lineCap = 'round';
         ctx.stroke();
-        ctx.globalCompositeOperation = 'source-over'; // 畫完恢復預設
+        ctx.globalCompositeOperation = 'source-over';
       }
     });
 
@@ -159,7 +157,8 @@ onValue(screenRef, async (snapshot) => {
       }
     });
 
-    async function handleWebRTCOffer(offer) {
+    // 3. WebRTC P2P 影音接收
+    async function handleWebRTCOffer(offer, mediaType) {
       if (peerConnection) return;
       peerConnection = new RTCPeerConnection(rtcConfig);
       
@@ -167,6 +166,12 @@ onValue(screenRef, async (snapshot) => {
         const remoteVideo = document.getElementById('remote-video');
         if (remoteVideo.srcObject !== event.streams[0]) {
           remoteVideo.srcObject = event.streams[0];
+          // 如果是影片或麥克風，開啟聲音播放
+          if (mediaType === 'video-file' || mediaType === 'mic') {
+            remoteVideo.muted = false;
+          } else {
+            remoteVideo.muted = true;
+          }
           remoteVideo.play().catch(e => console.log("Autoplay:", e));
         }
       };
