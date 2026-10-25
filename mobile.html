@@ -91,7 +91,10 @@
       <!-- 影片檔選取 -->
       <button class="action-btn" style="background: #ff9500; margin-bottom: 12px;" onclick="document.getElementById('video-file-input').click()">🎬 選擇手機影片檔推送到大屏</button>
       <input type="file" id="video-file-input" accept="video/*" style="display:none;" onchange="(event)">
-      <video id="local-video-file" playsinline webkit-playsinline loop muted style="position: absolute; top: -9999px; left: -9999px; width: 1px; height: 1px; opacity: 0; pointer-events: none;"></video>
+     <div id="video-file-preview-box" style="display:none; margin-top: 10px; text-align: center;">
+  <p style="font-size:0.8rem; color:#666; margin-bottom:4px;">🎬 影片播放串流中（手機端請勿關閉此分頁）：</p>
+  <video id="local-video-file" playsinline webkit-playsinline loop muted controls style="width: 100%; max-height: 180px; border-radius: 8px; background: #000;"></video>
+</div>
 
       <p style="font-size: 0.8rem; color: #8e8e93; text-align: center; margin: 5px 0 10px 0;">— 或 —</p>
 
@@ -274,6 +277,7 @@
 
     // 4. 推送相冊影片檔 (WebRTC P2P 本地串流)
     // 處理手機本機影片檔案推送 (支援 iOS Safari Canvas 轉接)
+// 處理手機本機影片檔案推送 (100% 相容 iOS Safari Canvas 轉接)
 window.handleVideoFileSelect = async function(e) {
   const file = e.target.files[0];
   if (!file) return;
@@ -282,10 +286,19 @@ window.handleVideoFileSelect = async function(e) {
   stopWebRTC();
 
   const videoEl = document.getElementById('local-video-file');
+  const previewBox = document.getElementById('video-file-preview-box');
+  
+  // 顯示手機端影片預覽，確保 iOS 正常渲染畫格
+  previewBox.style.display = 'block';
   videoEl.src = URL.createObjectURL(file);
 
   try {
-    // 1. 播放影片
+    // 🌟 1. 等待 iOS 載入影片尺寸資訊 (避免 videoWidth 為 0)
+    await new Promise((resolve) => {
+      if (videoEl.readyState >= 1) resolve();
+      else videoEl.onloadedmetadata = () => resolve();
+    });
+
     await videoEl.play();
 
     let stream = null;
@@ -296,18 +309,18 @@ window.handleVideoFileSelect = async function(e) {
       try {
         stream = captureFn.call(videoEl);
       } catch (err) {
-        console.log("原生 captureStream 失敗，切換至 iOS Canvas 備援");
+        console.log("原生 captureStream 失敗，切換至 Canvas 備援");
       }
     }
 
-    // 3. 🌟 iOS Safari 專屬備援方案：利用 Canvas 繪製畫面轉換串流
+    // 3. 🌟 iOS Safari Canvas 繪製轉接備援
     if (!stream || stream.getVideoTracks().length === 0) {
       const canvas = document.createElement('canvas');
       canvas.width = videoEl.videoWidth || 640;
       canvas.height = videoEl.videoHeight || 360;
       const ctx = canvas.getContext('2d');
 
-      // 實時繪製影格
+      // 實時畫布繪製
       function drawFrame() {
         if (!videoEl.paused && !videoEl.ended) {
           ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
@@ -315,17 +328,19 @@ window.handleVideoFileSelect = async function(e) {
         }
       }
       drawFrame();
-      videoEl.onplay = drawFrame;
 
-      // 從 Canvas 取得影像軌 (30 FPS)
-      const canvasStream = canvas.captureStream(30);
+      // 從 Canvas 擷取 25 FPS 視訊軌
+      const canvasStream = canvas.captureStream(25);
       const tracks = [...canvasStream.getVideoTracks()];
 
-      // 嘗試透過 Web Audio 擷取影片聲音
+      // 透過 Web Audio 擷取影片聲音軌
       try {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         if (AudioContext) {
           const audioCtx = new AudioContext();
+          if (audioCtx.state === 'suspended') {
+            await audioCtx.resume();
+          }
           const source = audioCtx.createMediaElementSource(videoEl);
           const dest = audioCtx.createMediaStreamDestination();
           source.connect(dest);
@@ -334,13 +349,13 @@ window.handleVideoFileSelect = async function(e) {
           }
         }
       } catch (audioErr) {
-        console.warn("無法擷取影片聲音軌:", audioErr);
+        console.warn("音訊擷取略過（將進行無聲串流）:", audioErr);
       }
 
       stream = new MediaStream(tracks);
     }
 
-    // 4. 建立 WebRTC P2P 連線
+    // 4. 發送 WebRTC 訊號至大屏
     remove(ref(db, 'screens/' + screenId));
     peerConnection = new RTCPeerConnection(rtcConfig);
 
@@ -370,6 +385,16 @@ window.handleVideoFileSelect = async function(e) {
   } catch (err) {
     alert('iOS 影片讀取失敗：' + err.message);
   }
+};
+
+// 在原有的 stopWebRTC 內加入隱藏預覽區塊
+const originalStopWebRTC = window.stopWebRTC;
+window.stopWebRTC = function() {
+  const videoEl = document.getElementById('local-video-file');
+  const previewBox = document.getElementById('video-file-preview-box');
+  if (videoEl) { videoEl.pause(); videoEl.src = ""; }
+  if (previewBox) previewBox.style.display = 'none';
+  if (originalStopWebRTC) originalStopWebRTC();
 };
 
     // 5. 拍照定格推送到大屏
