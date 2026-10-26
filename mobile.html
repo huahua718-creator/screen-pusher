@@ -279,120 +279,122 @@
 
     // 4. 推送相冊影片檔 (強化 iOS Safari 穩健度)
     window.handleVideoFileSelect = async function(e) {
-      try {
-        const file = e.target.files[0];
-        if (!file) return;
+  try {
+    const file = e.target.files[0];
+    if (!file) return;
 
-        const screenId = getScreenId();
-        if (!screenId) return;
+    const screenId = getScreenId();
+    if (!screenId) return;
 
-        stopWebRTC();
+    // 1. 完全停止並清理上一次的 WebRTC 連線
+    stopWebRTC();
 
-        const videoEl = document.getElementById('local-video-file');
-        const previewBox = document.getElementById('video-file-preview-box');
+    const videoEl = document.getElementById('local-video-file');
+    const previewBox = document.getElementById('video-file-preview-box');
 
-        if (!videoEl) {
-          alert('找不到影片播放元件，請重新載入頁面');
-          return;
-        }
+    if (!videoEl) {
+      alert('找不到影片播放元件，請重新整理頁面');
+      return;
+    }
 
-        if (previewBox) previewBox.style.display = 'block';
+    if (previewBox) previewBox.style.display = 'block';
 
-        videoEl.muted = true;
-        videoEl.playsInline = true;
-        videoEl.setAttribute('playsinline', '');
-        videoEl.setAttribute('webkit-playsinline', '');
-        videoEl.src = URL.createObjectURL(file);
+    videoEl.muted = true;
+    videoEl.playsInline = true;
+    videoEl.setAttribute('playsinline', '');
+    videoEl.setAttribute('webkit-playsinline', '');
+    videoEl.src = URL.createObjectURL(file);
 
-        // 等待影片 Metadata 加載完成
-        await new Promise((resolve, reject) => {
-          const timer = setTimeout(() => reject(new Error('影片載入超時')), 10000);
-          if (videoEl.readyState >= 1) {
-            clearTimeout(timer);
-            resolve();
-          } else {
-            videoEl.onloadedmetadata = () => { clearTimeout(timer); resolve(); };
-            videoEl.onerror = (err) => { clearTimeout(timer); reject(err); };
-          }
-        });
-
-        await videoEl.play();
-
-        let stream = null;
-        const captureFn = (videoEl.captureStream || videoEl.webkitCaptureStream || videoEl.mozCaptureStream);
-        if (captureFn) {
-          try { stream = captureFn.call(videoEl); } catch (err) { console.log('使用 Canvas 轉接串流'); }
-        }
-
-        // iOS Safari 畫布轉接備援
-        if (!stream || stream.getVideoTracks().length === 0) {
-          const canvas = document.createElement('canvas');
-          canvas.width = videoEl.videoWidth || 640;
-          canvas.height = videoEl.videoHeight || 360;
-          const ctx = canvas.getContext('2d');
-
-          function drawFrame() {
-            if (!videoEl.paused && !videoEl.ended) {
-              ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-              requestAnimationFrame(drawFrame);
-            }
-          }
-          drawFrame();
-
-          const canvasStream = canvas.captureStream(25);
-          const tracks = [...canvasStream.getVideoTracks()];
-
-          // 嘗試抓取音訊軌（防護不會因例外卡死）
-          try {
-            const AudioContext = window.AudioContext || window.webkitAudioContext;
-            if (AudioContext) {
-              const audioCtx = new AudioContext();
-              if (audioCtx.state === 'suspended') await audioCtx.resume();
-              const source = audioCtx.createMediaElementSource(videoEl);
-              const dest = audioCtx.createMediaStreamDestination();
-              source.connect(dest);
-              if (dest.stream.getAudioTracks().length > 0) {
-                tracks.push(dest.stream.getAudioTracks()[0]);
-              }
-            }
-          } catch (audioErr) {
-            console.warn('音訊處理略過（將無聲串流）:', audioErr);
-          }
-
-          stream = new MediaStream(tracks);
-        }
-
-        remove(ref(db, 'screens/' + screenId));
-        peerConnection = new RTCPeerConnection(rtcConfig);
-
-        stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
-
-        peerConnection.onicecandidate = (event) => {
-          if (event.candidate) push(ref(db, `screens/${screenId}/callerCandidates`), event.candidate.toJSON());
-        };
-
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
-
-        set(ref(db, `screens/${screenId}`), {
-          mode: 'webrtc',
-          mediaType: 'video-file',
-          offer: { type: offer.type, sdp: offer.sdp }
-        });
-
-        onValue(ref(db, `screens/${screenId}/answer`), (snap) => {
-          const ans = snap.val();
-          if (ans && peerConnection.signalingState !== 'stable') {
-            peerConnection.setRemoteDescription(new RTCSessionDescription(ans));
-          }
-        });
-
-        alert('✓ 手機影片已開始串流推送至大屏！');
-
-      } catch (err) {
-        alert('影片開啟失敗：' + (err.message || err));
+    // 2. 等待影片元資料加載
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('影片載入超時')), 10000);
+      if (videoEl.readyState >= 1) {
+        clearTimeout(timer);
+        resolve();
+      } else {
+        videoEl.onloadedmetadata = () => { clearTimeout(timer); resolve(); };
+        videoEl.onerror = (err) => { clearTimeout(timer); reject(err); };
       }
+    });
+
+    await videoEl.play();
+
+    // 3. 擷取影片畫格串流
+    let stream = null;
+    const captureFn = (videoEl.captureStream || videoEl.webkitCaptureStream || videoEl.mozCaptureStream);
+    if (captureFn) {
+      try { stream = captureFn.call(videoEl); } catch (err) { console.log('切換為 Canvas 轉接串流'); }
+    }
+
+    // iOS Safari Canvas 備援轉接
+    if (!stream || stream.getVideoTracks().length === 0) {
+      const canvas = document.createElement('canvas');
+      canvas.width = videoEl.videoWidth || 640;
+      canvas.height = videoEl.videoHeight || 360;
+      const ctx = canvas.getContext('2d');
+
+      function drawFrame() {
+        if (!videoEl.paused && !videoEl.ended) {
+          ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+          requestAnimationFrame(drawFrame);
+        }
+      }
+      drawFrame();
+
+      const canvasStream = canvas.captureStream(25);
+      const tracks = [...canvasStream.getVideoTracks()];
+
+      try {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (AudioContext) {
+          const audioCtx = new AudioContext();
+          if (audioCtx.state === 'suspended') await audioCtx.resume();
+          const source = audioCtx.createMediaElementSource(videoEl);
+          const dest = audioCtx.createMediaStreamDestination();
+          source.connect(dest);
+          if (dest.stream.getAudioTracks().length > 0) {
+            tracks.push(dest.stream.getAudioTracks()[0]);
+          }
+        }
+      } catch (audioErr) {
+        console.warn('音訊處理略過（將無聲串流）:', audioErr);
+      }
+
+      stream = new MediaStream(tracks);
+    }
+
+    // 4. 清除 Firebase 舊節點並發送 Offer
+    await remove(ref(db, 'screens/' + screenId));
+
+    peerConnection = new RTCPeerConnection(rtcConfig);
+    stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
+
+    peerConnection.onicecandidate = (event) => {
+      if (event.candidate) push(ref(db, `screens/${screenId}/callerCandidates`), event.candidate.toJSON());
     };
+
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+
+    set(ref(db, `screens/${screenId}`), {
+      mode: 'webrtc',
+      mediaType: 'video-file',
+      offer: { type: offer.type, sdp: offer.sdp }
+    });
+
+    onValue(ref(db, `screens/${screenId}/answer`), (snap) => {
+      const ans = snap.val();
+      if (ans && peerConnection.signalingState !== 'stable') {
+        peerConnection.setRemoteDescription(new RTCSessionDescription(ans));
+      }
+    });
+
+    alert('✓ 手機影片已開始串流推送至大屏！');
+
+  } catch (err) {
+    alert('影片開啟失敗：' + (err.message || err));
+  }
+};
 
     // 5. 拍照定格推送到大屏
     window.pushSnapshotToScreen = function() {
