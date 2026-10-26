@@ -165,10 +165,17 @@
     let peerConnection = null;
     let calleeCandidatesRef = null;
     let answerRef = null;
+    let iceCandidateQueue = [];
     let isLiveDrawing = false;
     let isEraserMode = false;
     let currentColor = '#ff3b30';
-    const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+    const rtcConfig = {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' }
+      ]
+    };
 
     document.addEventListener('DOMContentLoaded', () => { loadHistory(); });
 
@@ -264,27 +271,31 @@
       reader.readAsDataURL(file);
     };
 
-    // 核心 WebRTC 信號建立封裝
+    // WebRTC 建立 (含 Candidate 佇列暫存修復)
     async function setupWebRTC(stream, mediaType) {
-      const screenId = getScreenId();
-      if (!screenId) return;
+      const screenId = getScreenId(); if (!screenId) return;
 
       stopWebRTC();
 
-      // 🌟 1. 異步等待 Firebase 清空舊節點
       await remove(ref(db, 'screens/' + screenId));
 
       peerConnection = new RTCPeerConnection(rtcConfig);
+      iceCandidateQueue = [];
 
       if (stream) {
         stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
       }
 
-      // 🌟 2. 補全：監聽並加入大屏回傳的 ICE Candidate
+      // 監聽大屏傳回的 Candidates，若未 ready 先推入佇列
       calleeCandidatesRef = ref(db, `screens/${screenId}/calleeCandidates`);
       onChildAdded(calleeCandidatesRef, (snapshot) => {
-        if (snapshot.val() && peerConnection && peerConnection.remoteDescription) {
-          peerConnection.addIceCandidate(new RTCIceCandidate(snapshot.val())).catch(e => console.error(e));
+        if (snapshot.val()) {
+          const candidate = new RTCIceCandidate(snapshot.val());
+          if (peerConnection && peerConnection.remoteDescription) {
+            peerConnection.addIceCandidate(candidate).catch(e => console.error(e));
+          } else {
+            iceCandidateQueue.push(candidate);
+          }
         }
       });
 
@@ -304,15 +315,19 @@
       });
 
       answerRef = ref(db, `screens/${screenId}/answer`);
-      onValue(answerRef, (snap) => {
+      onValue(answerRef, async (snap) => {
         const ans = snap.val();
         if (ans && peerConnection && peerConnection.signalingState !== 'stable') {
-          peerConnection.setRemoteDescription(new RTCSessionDescription(ans)).catch(e => console.error(e));
+          await peerConnection.setRemoteDescription(new RTCSessionDescription(ans)).catch(e => console.error(e));
+          // 遠端描述就緒後，一次性消化佇列中的 Candidate
+          while (iceCandidateQueue.length > 0) {
+            const cand = iceCandidateQueue.shift();
+            await peerConnection.addIceCandidate(cand).catch(e => console.error(e));
+          }
         }
       });
     }
 
-    // 手機影片推送
     window.handleVideoFileSelect = async function(e) {
       try {
         const file = e.target.files[0];
@@ -343,7 +358,7 @@
         let stream = null;
         const captureFn = (videoEl.captureStream || videoEl.webkitCaptureStream || videoEl.mozCaptureStream);
         if (captureFn) {
-          try { stream = captureFn.call(videoEl); } catch (err) { console.log('使用 Canvas 轉接'); }
+          try { stream = captureFn.call(videoEl); } catch (err) { console.log('切換為 Canvas 轉接'); }
         }
 
         if (!stream || stream.getVideoTracks().length === 0) {
@@ -388,7 +403,6 @@
       }
     };
 
-    // 實時鏡頭 / 麥克風啟動
     window.startWebRTC = async function(type) {
       try {
         const constraints = type === 'camera' 
@@ -414,7 +428,8 @@
       if (answerRef) { off(answerRef); answerRef = null; }
       if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
       if (peerConnection) { peerConnection.close(); peerConnection = null; }
-      
+      iceCandidateQueue = [];
+
       const videoEl = document.getElementById('local-video-file');
       const previewBox = document.getElementById('video-file-preview-box');
       if (videoEl) { videoEl.pause(); videoEl.src = ""; }
