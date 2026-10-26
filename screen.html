@@ -48,7 +48,7 @@
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getDatabase, ref, onValue, set, push, onChildAdded, remove, off } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+    import { getDatabase, ref, onValue, set, push, onChildAdded, remove, off, update } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyBWa8b0rQl-qj-IWjP5hZntEi4ud_cOeVA",
@@ -77,7 +77,7 @@
     const screenRef = ref(db, 'screens/' + screenId);
     let peerConnection = null;
     let callerCandidatesRef = null;
-    let currentOfferSdp = null; // 🌟 鎖定當前連線，防止死迴圈重置
+    let currentOfferSdp = null;
     let iceCandidateQueue = [];
 
     const rtcConfig = {
@@ -94,7 +94,6 @@
       return url;
     }
 
-    // 1. 監聽模式變更
     onValue(screenRef, async (snapshot) => {
       const data = snapshot.val();
       if (!data) return;
@@ -114,7 +113,6 @@
         else if (data.mediaType === 'video-file') tag.innerText = '🎬 手機影片播放中';
         else tag.innerText = '🎥 無線實物鏡頭中';
         
-        // 🌟 核心修正：僅當收到全新 Offer 時才重新建立 WebRTC
         if (data.offer.sdp !== currentOfferSdp) {
           currentOfferSdp = data.offer.sdp;
           closeWebRTC();
@@ -126,7 +124,6 @@
       }
     });
 
-    // 2. 畫筆圖層
     const drawEventsRef = ref(db, `screens/${screenId}/drawEvents`);
     onChildAdded(drawEventsRef, (snapshot) => {
       const d = snapshot.val();
@@ -151,7 +148,6 @@
       if (!snapshot.exists()) ctx.clearRect(0, 0, canvas.width, canvas.height);
     });
 
-    // 3. 處理 WebRTC
     async function handleWebRTCOffer(offer, mediaType) {
       peerConnection = new RTCPeerConnection(rtcConfig);
       iceCandidateQueue = [];
@@ -160,7 +156,7 @@
         const remoteVideo = document.getElementById('remote-video');
         if (remoteVideo.srcObject !== event.streams[0]) {
           remoteVideo.srcObject = event.streams[0];
-          remoteVideo.muted = true; // 先靜音確保順利播放
+          remoteVideo.muted = true;
           remoteVideo.play().then(() => {
             if (mediaType === 'video-file' || mediaType === 'mic') {
               setTimeout(() => { remoteVideo.muted = false; }, 300);
@@ -184,7 +180,7 @@
 
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
-      await set(ref(db, `screens/${screenId}/answer`), { type: answer.type, sdp: answer.sdp });
+      await update(ref(db, `screens/${screenId}`), { answer: { type: answer.type, sdp: answer.sdp } });
 
       callerCandidatesRef = ref(db, `screens/${screenId}/callerCandidates`);
       onChildAdded(callerCandidatesRef, (snapshot) => {
