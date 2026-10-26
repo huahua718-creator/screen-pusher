@@ -21,7 +21,7 @@
     button.push-btn { background: #34c759; }
     button.stop-btn { background: #ff3b30; }
 
-    /* 手機畫筆畫布：支援動態背景圖片 */
+    /* 手機畫筆畫布 */
     #draw-pad { 
       width: 100%; height: 320px; background-color: #1c1c1e; background-size: contain; 
       background-repeat: no-repeat; background-position: center; border-radius: 8px; 
@@ -63,7 +63,7 @@
       <button class="tab-btn" onclick="switchTab('mic-tab', this)">麥克風</button>
     </div>
 
-    <!-- 1. 網址推送頁籤 (含自訂名稱與歷史選單) -->
+    <!-- 1. 網址推送頁籤 -->
     <div id="url-tab" class="tab-content active card">
       <label for="url-input">貼上網址或 YouTube 連結：</label>
       <input type="url" id="url-input" placeholder="https://example.com">
@@ -80,7 +80,7 @@
       <button style="width:100%; background:none; border:none; color:#8e8e93; font-size:0.75rem; margin-top:8px; cursor:pointer;" onclick="clearHistory()">清空歷史紀錄</button>
     </div>
 
-    <!-- 2. 媒體與鏡頭頁籤 (相冊照片、影片檔案、實況鏡頭) -->
+    <!-- 2. 媒體與鏡頭頁籤 -->
     <div id="camera-tab" class="tab-content card">
       <label>媒體推送方式：</label>
 
@@ -88,21 +88,23 @@
       <button class="action-btn" style="background: #5856d6; margin-bottom: 8px;" onclick="document.getElementById('gallery-input').click()">🖼️ 選擇手機相冊照片推送到大屏</button>
       <input type="file" id="gallery-input" accept="image/*" style="display:none;" onchange="handleGallerySelect(event)">
 
-      <!-- 影片檔選取 -->
-      <button class="action-btn" style="background: #ff9500; margin-bottom: 12px;" onclick="document.getElementById('video-file-input').click()">🎬 選擇手機影片檔推送到大屏</button>
-      <input type="file" id="video-file-input" accept="video/*" style="display:none;" onchange="(event)">
-     <div id="video-file-preview-box" style="display:none; margin-top: 10px; text-align: center;">
-  <p style="font-size:0.8rem; color:#666; margin-bottom:4px;">🎬 影片播放串流中（手機端請勿關閉此分頁）：</p>
-  <video id="local-video-file" playsinline webkit-playsinline loop muted controls style="width: 100%; max-height: 180px; border-radius: 8px; background: #000;"></video>
-</div>
+      <!-- 影片檔選取與手機預覽容器 -->
+      <button class="action-btn" style="background: #ff9500; margin-bottom: 8px;" onclick="document.getElementById('video-file-input').click()">🎬 選擇手機影片檔推送到大屏</button>
+      <input type="file" id="video-file-input" accept="video/*" style="display:none;" onchange="handleVideoFileSelect(event)">
+      
+      <!-- 影片手機端預覽區塊 (維持 iOS 正常渲染解碼) -->
+      <div id="video-file-preview-box" style="display:none; margin-top: 10px; text-align: center;">
+        <p style="font-size:0.8rem; color:#666; margin-bottom:4px;">🎬 影片串流中（請勿關閉此分頁）：</p>
+        <video id="local-video-file" playsinline webkit-playsinline loop muted controls style="width: 100%; max-height: 180px; border-radius: 8px; background: #000;"></video>
+      </div>
 
-      <p style="font-size: 0.8rem; color: #8e8e93; text-align: center; margin: 5px 0 10px 0;">— 或 —</p>
+      <p style="font-size: 0.8rem; color: #8e8e93; text-align: center; margin: 10px 0;">— 或 —</p>
 
       <!-- 實況鏡頭 -->
       <button id="cam-start-btn" class="action-btn push-btn" onclick="startWebRTC('camera')">🎥 開啟手機全螢幕實時鏡頭</button>
     </div>
 
-    <!-- 3. 畫筆標註頁籤 (含橡皮擦工具) -->
+    <!-- 3. 畫筆標註頁籤 -->
     <div id="draw-tab" class="tab-content card">
       <label id="draw-status-label">在畫布上手指滑動標註，大屏同步繪製：</label>
       <canvas id="draw-pad"></canvas>
@@ -130,7 +132,7 @@
     </div>
   </div>
 
-  <!-- 全螢幕鏡頭與懸浮工具選單 Overlay -->
+  <!-- 全螢幕鏡頭 Overlay -->
   <div id="camera-fullscreen-overlay">
     <video id="local-preview" autoplay playsinline muted></video>
     <canvas id="live-draw-canvas"></canvas>
@@ -275,127 +277,122 @@
       reader.readAsDataURL(file);
     };
 
-    // 4. 推送相冊影片檔 (WebRTC P2P 本地串流)
-    // 處理手機本機影片檔案推送 (支援 iOS Safari Canvas 轉接)
-// 處理手機本機影片檔案推送 (100% 相容 iOS Safari Canvas 轉接)
-window.handleVideoFileSelect = async function(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  const screenId = getScreenId(); if (!screenId) return;
-
-  stopWebRTC();
-
-  const videoEl = document.getElementById('local-video-file');
-  const previewBox = document.getElementById('video-file-preview-box');
-  
-  // 顯示手機端影片預覽，確保 iOS 正常渲染畫格
-  previewBox.style.display = 'block';
-  videoEl.src = URL.createObjectURL(file);
-
-  try {
-    // 🌟 1. 等待 iOS 載入影片尺寸資訊 (避免 videoWidth 為 0)
-    await new Promise((resolve) => {
-      if (videoEl.readyState >= 1) resolve();
-      else videoEl.onloadedmetadata = () => resolve();
-    });
-
-    await videoEl.play();
-
-    let stream = null;
-
-    // 2. 嘗試原生 captureStream (Android / Desktop)
-    const captureFn = (videoEl.captureStream || videoEl.webkitCaptureStream || videoEl.mozCaptureStream);
-    if (captureFn) {
+    // 4. 推送相冊影片檔 (強化 iOS Safari 穩健度)
+    window.handleVideoFileSelect = async function(e) {
       try {
-        stream = captureFn.call(videoEl);
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const screenId = getScreenId();
+        if (!screenId) return;
+
+        stopWebRTC();
+
+        const videoEl = document.getElementById('local-video-file');
+        const previewBox = document.getElementById('video-file-preview-box');
+
+        if (!videoEl) {
+          alert('找不到影片播放元件，請重新載入頁面');
+          return;
+        }
+
+        if (previewBox) previewBox.style.display = 'block';
+
+        videoEl.muted = true;
+        videoEl.playsInline = true;
+        videoEl.setAttribute('playsinline', '');
+        videoEl.setAttribute('webkit-playsinline', '');
+        videoEl.src = URL.createObjectURL(file);
+
+        // 等待影片 Metadata 加載完成
+        await new Promise((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error('影片載入超時')), 10000);
+          if (videoEl.readyState >= 1) {
+            clearTimeout(timer);
+            resolve();
+          } else {
+            videoEl.onloadedmetadata = () => { clearTimeout(timer); resolve(); };
+            videoEl.onerror = (err) => { clearTimeout(timer); reject(err); };
+          }
+        });
+
+        await videoEl.play();
+
+        let stream = null;
+        const captureFn = (videoEl.captureStream || videoEl.webkitCaptureStream || videoEl.mozCaptureStream);
+        if (captureFn) {
+          try { stream = captureFn.call(videoEl); } catch (err) { console.log('使用 Canvas 轉接串流'); }
+        }
+
+        // iOS Safari 畫布轉接備援
+        if (!stream || stream.getVideoTracks().length === 0) {
+          const canvas = document.createElement('canvas');
+          canvas.width = videoEl.videoWidth || 640;
+          canvas.height = videoEl.videoHeight || 360;
+          const ctx = canvas.getContext('2d');
+
+          function drawFrame() {
+            if (!videoEl.paused && !videoEl.ended) {
+              ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+              requestAnimationFrame(drawFrame);
+            }
+          }
+          drawFrame();
+
+          const canvasStream = canvas.captureStream(25);
+          const tracks = [...canvasStream.getVideoTracks()];
+
+          // 嘗試抓取音訊軌（防護不會因例外卡死）
+          try {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (AudioContext) {
+              const audioCtx = new AudioContext();
+              if (audioCtx.state === 'suspended') await audioCtx.resume();
+              const source = audioCtx.createMediaElementSource(videoEl);
+              const dest = audioCtx.createMediaStreamDestination();
+              source.connect(dest);
+              if (dest.stream.getAudioTracks().length > 0) {
+                tracks.push(dest.stream.getAudioTracks()[0]);
+              }
+            }
+          } catch (audioErr) {
+            console.warn('音訊處理略過（將無聲串流）:', audioErr);
+          }
+
+          stream = new MediaStream(tracks);
+        }
+
+        remove(ref(db, 'screens/' + screenId));
+        peerConnection = new RTCPeerConnection(rtcConfig);
+
+        stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
+
+        peerConnection.onicecandidate = (event) => {
+          if (event.candidate) push(ref(db, `screens/${screenId}/callerCandidates`), event.candidate.toJSON());
+        };
+
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+
+        set(ref(db, `screens/${screenId}`), {
+          mode: 'webrtc',
+          mediaType: 'video-file',
+          offer: { type: offer.type, sdp: offer.sdp }
+        });
+
+        onValue(ref(db, `screens/${screenId}/answer`), (snap) => {
+          const ans = snap.val();
+          if (ans && peerConnection.signalingState !== 'stable') {
+            peerConnection.setRemoteDescription(new RTCSessionDescription(ans));
+          }
+        });
+
+        alert('✓ 手機影片已開始串流推送至大屏！');
+
       } catch (err) {
-        console.log("原生 captureStream 失敗，切換至 Canvas 備援");
+        alert('影片開啟失敗：' + (err.message || err));
       }
-    }
-
-    // 3. 🌟 iOS Safari Canvas 繪製轉接備援
-    if (!stream || stream.getVideoTracks().length === 0) {
-      const canvas = document.createElement('canvas');
-      canvas.width = videoEl.videoWidth || 640;
-      canvas.height = videoEl.videoHeight || 360;
-      const ctx = canvas.getContext('2d');
-
-      // 實時畫布繪製
-      function drawFrame() {
-        if (!videoEl.paused && !videoEl.ended) {
-          ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-          requestAnimationFrame(drawFrame);
-        }
-      }
-      drawFrame();
-
-      // 從 Canvas 擷取 25 FPS 視訊軌
-      const canvasStream = canvas.captureStream(25);
-      const tracks = [...canvasStream.getVideoTracks()];
-
-      // 透過 Web Audio 擷取影片聲音軌
-      try {
-        const AudioContext = window.AudioContext || window.webkitAudioContext;
-        if (AudioContext) {
-          const audioCtx = new AudioContext();
-          if (audioCtx.state === 'suspended') {
-            await audioCtx.resume();
-          }
-          const source = audioCtx.createMediaElementSource(videoEl);
-          const dest = audioCtx.createMediaStreamDestination();
-          source.connect(dest);
-          if (dest.stream.getAudioTracks().length > 0) {
-            tracks.push(dest.stream.getAudioTracks()[0]);
-          }
-        }
-      } catch (audioErr) {
-        console.warn("音訊擷取略過（將進行無聲串流）:", audioErr);
-      }
-
-      stream = new MediaStream(tracks);
-    }
-
-    // 4. 發送 WebRTC 訊號至大屏
-    remove(ref(db, 'screens/' + screenId));
-    peerConnection = new RTCPeerConnection(rtcConfig);
-
-    stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
-
-    peerConnection.onicecandidate = (event) => {
-      if (event.candidate) push(ref(db, `screens/${screenId}/callerCandidates`), event.candidate.toJSON());
     };
-
-    const offer = await peerConnection.createOffer();
-    await peerConnection.setLocalDescription(offer);
-
-    set(ref(db, `screens/${screenId}`), {
-      mode: 'webrtc',
-      mediaType: 'video-file',
-      offer: { type: offer.type, sdp: offer.sdp }
-    });
-
-    onValue(ref(db, `screens/${screenId}/answer`), (snap) => {
-      const ans = snap.val();
-      if (ans && peerConnection.signalingState !== 'stable') {
-        peerConnection.setRemoteDescription(new RTCSessionDescription(ans));
-      }
-    });
-
-    alert('✓ 手機影片已開始串流推送至大屏！');
-  } catch (err) {
-    alert('iOS 影片讀取失敗：' + err.message);
-  }
-};
-
-// 在原有的 stopWebRTC 內加入隱藏預覽區塊
-const originalStopWebRTC = window.stopWebRTC;
-window.stopWebRTC = function() {
-  const videoEl = document.getElementById('local-video-file');
-  const previewBox = document.getElementById('video-file-preview-box');
-  if (videoEl) { videoEl.pause(); videoEl.src = ""; }
-  if (previewBox) previewBox.style.display = 'none';
-  if (originalStopWebRTC) originalStopWebRTC();
-};
 
     // 5. 拍照定格推送到大屏
     window.pushSnapshotToScreen = function() {
@@ -480,8 +477,11 @@ window.stopWebRTC = function() {
     window.stopWebRTC = function() {
       if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
       if (peerConnection) { peerConnection.close(); peerConnection = null; }
+      
       const videoEl = document.getElementById('local-video-file');
+      const previewBox = document.getElementById('video-file-preview-box');
       if (videoEl) { videoEl.pause(); videoEl.src = ""; }
+      if (previewBox) previewBox.style.display = 'none';
 
       document.getElementById('camera-fullscreen-overlay').style.display = 'none';
       document.getElementById('live-color-bar').style.display = 'none';
