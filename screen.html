@@ -55,179 +55,184 @@
 
   <button id="reset-btn" onclick="resetScreen()">結束並返回待機</button>
 
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getDatabase, ref, onValue, set, push, onChildAdded, remove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+  <!-- 將 screen.html 的 <script type="module"> 完整替換為以下內容 -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+  import { getDatabase, ref, onValue, set, push, onChildAdded, remove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
-    // 您的 Firebase 設定
-    const firebaseConfig = {
-      apiKey: "AIzaSyBWa8b0rQl-qj-IWjP5hZntEi4ud_cOeVA",
-      authDomain: "screen-pusher.firebaseapp.com",
-      databaseURL: "https://screen-pusher-default-rtdb.asia-southeast1.firebasedatabase.app/",
-      projectId: "screen-pusher"
-    };
+  const firebaseConfig = {
+    apiKey: "AIzaSyBWa8b0rQl-qj-IWjP5hZntEi4ud_cOeVA",
+    authDomain: "screen-pusher.firebaseapp.com",
+    databaseURL: "https://screen-pusher-default-rtdb.asia-southeast1.firebasedatabase.app/",
+    projectId: "screen-pusher"
+  };
 
-    const app = initializeApp(firebaseConfig);
-    const db = getDatabase(app);
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
 
-    const urlParams = new URLSearchParams(window.location.search);
-    let screenId = urlParams.get('id') || Math.floor(100000 + Math.random() * 900000).toString();
-    window.history.replaceState(null, '', `?id=${screenId}`);
+  const urlParams = new URLSearchParams(window.location.search);
+  let screenId = urlParams.get('id') || Math.floor(100000 + Math.random() * 900000).toString();
+  window.history.replaceState(null, '', `?id=${screenId}`);
 
-    document.getElementById('pin-display').innerText = screenId;
-    const mobileUrl = `${window.location.origin}/mobile.html?id=${screenId}`;
-    new QRCode(document.getElementById("qrcode"), { text: mobileUrl, width: 200, height: 200 });
+  document.getElementById('pin-display').innerText = screenId;
+  const mobileUrl = `${window.location.origin}/mobile.html?id=${screenId}`;
+  new QRCode(document.getElementById("qrcode"), { text: mobileUrl, width: 200, height: 200 });
 
-    const canvas = document.getElementById('annotation-canvas');
-    const ctx = canvas.getContext('2d');
-    function resizeCanvas() {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
+  const canvas = document.getElementById('annotation-canvas');
+  const ctx = canvas.getContext('2d');
+  function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
+
+  const screenRef = ref(db, 'screens/' + screenId);
+  let peerConnection = null;
+  const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
+  function formatEmbedUrl(url) {
+    if (!url) return url;
+    const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/))([\w-]{11})/);
+    if (ytMatch && ytMatch[1]) {
+      return `https://www.youtube.com/embed/${ytMatch[1]}?autoplay=1`;
     }
-    window.addEventListener('resize', resizeCanvas);
-    resizeCanvas();
+    return url;
+  }
 
-    const screenRef = ref(db, 'screens/' + screenId);
-    let peerConnection = null;
-    const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+  // 1. 監聽狀態與模式變更
+  onValue(screenRef, async (snapshot) => {
+    const data = snapshot.val();
+    if (!data) return;
 
-    // YouTube 網址自動轉換為內嵌格式
-    function formatEmbedUrl(url) {
-      if (!url) return url;
-      const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/))([\w-]{11})/);
-      if (ytMatch && ytMatch[1]) {
-        return `https://www.youtube.com/embed/${ytMatch[1]}?autoplay=1`;
-      }
-      return url;
-    }
-
-    // 1. 監聽狀態與模式變更
-    onValue(screenRef, async (snapshot) => {
-      const data = snapshot.val();
-      if (!data) return;
-
-      if (data.mode === 'url' && data.url) {
-        closeWebRTC();
-        showView('iframe');
-        document.getElementById('iframe-view').src = formatEmbedUrl(data.url);
-      } else if (data.mode === 'photo' && data.photoUrl) {
-        closeWebRTC();
-        showView('photo');
-        document.getElementById('photo-view').src = data.photoUrl;
-      } else if (data.mode === 'webrtc' && data.offer) {
-        showView('video');
-        const tag = document.getElementById('stream-type-tag');
-        if (data.mediaType === 'mic') tag.innerText = '🎙️ 無線麥克風廣播中';
-        else if (data.mediaType === 'video-file') tag.innerText = '🎬 手機影片播放中';
-        else tag.innerText = '🎥 無線實物鏡頭中';
-        
-        await handleWebRTCOffer(data.offer, data.mediaType);
-      } else if (data.mode === 'idle') {
-        resetUI();
-      }
-    });
-
-    // 2. 實時繪製與擦除畫筆數據 (支援橡皮擦 destination-out)
-    const drawEventsRef = ref(db, `screens/${screenId}/drawEvents`);
-    onChildAdded(drawEventsRef, (snapshot) => {
-      const d = snapshot.val();
-      if (d) {
-        ctx.beginPath();
-        ctx.moveTo(d.x0 * canvas.width, d.y0 * canvas.height);
-        ctx.lineTo(d.x1 * canvas.width, d.y1 * canvas.height);
-        
-        if (d.isEraser) {
-          ctx.globalCompositeOperation = 'destination-out';
-          ctx.lineWidth = d.size || 20;
-        } else {
-          ctx.globalCompositeOperation = 'source-over';
-          ctx.strokeStyle = d.color;
-          ctx.lineWidth = d.size || 4;
-        }
-
-        ctx.lineCap = 'round';
-        ctx.stroke();
-        ctx.globalCompositeOperation = 'source-over';
-      }
-    });
-
-    onValue(drawEventsRef, (snapshot) => {
-      if (!snapshot.exists()) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-      }
-    });
-
-    // 3. WebRTC P2P 影音接收
-    async function handleWebRTCOffer(offer, mediaType) {
-      if (peerConnection) return;
-      peerConnection = new RTCPeerConnection(rtcConfig);
-      
-      peerConnection.ontrack = (event) => {
-        const remoteVideo = document.getElementById('remote-video');
-        if (remoteVideo.srcObject !== event.streams[0]) {
-          remoteVideo.srcObject = event.streams[0];
-          // 如果是影片或麥克風，開啟聲音播放
-          if (mediaType === 'video-file' || mediaType === 'mic') {
-            remoteVideo.muted = false;
-          } else {
-            remoteVideo.muted = true;
-          }
-          remoteVideo.play().catch(e => console.log("Autoplay:", e));
-        }
-      };
-
-      peerConnection.onicecandidate = (event) => {
-        if (event.candidate) {
-          push(ref(db, `screens/${screenId}/calleeCandidates`), event.candidate.toJSON());
-        }
-      };
-
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-      const answer = await peerConnection.createAnswer();
-      await peerConnection.setLocalDescription(answer);
-      set(ref(db, `screens/${screenId}/answer`), { type: answer.type, sdp: answer.sdp });
-
-      onChildAdded(ref(db, `screens/${screenId}/callerCandidates`), (snapshot) => {
-        if (snapshot.val()) {
-          peerConnection.addIceCandidate(new RTCIceCandidate(snapshot.val()));
-        }
-      });
-    }
-
-    function closeWebRTC() {
-      if (peerConnection) { peerConnection.close(); peerConnection = null; }
-      const remoteVideo = document.getElementById('remote-video');
-      if (remoteVideo.srcObject) {
-        remoteVideo.srcObject.getTracks().forEach(track => track.stop());
-        remoteVideo.srcObject = null;
-      }
-    }
-
-    function showView(type) {
-      document.getElementById('qrcode-view').style.display = 'none';
-      document.getElementById('iframe-view').style.display = type === 'iframe' ? 'block' : 'none';
-      document.getElementById('photo-view').style.display = type === 'photo' ? 'block' : 'none';
-      document.getElementById('video-container').style.display = type === 'video' ? 'block' : 'none';
-      document.getElementById('reset-btn').style.display = 'block';
-    }
-
-    function resetUI() {
+    if (data.mode === 'url' && data.url) {
       closeWebRTC();
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      document.getElementById('iframe-view').src = "about:blank";
-      document.getElementById('photo-view').src = "";
-      document.getElementById('iframe-view').style.display = 'none';
-      document.getElementById('photo-view').style.display = 'none';
-      document.getElementById('video-container').style.display = 'none';
-      document.getElementById('qrcode-view').style.display = 'flex';
-      document.getElementById('reset-btn').style.display = 'none';
-    }
-
-    window.resetScreen = function() {
-      remove(screenRef);
-      set(screenRef, { mode: 'idle' });
+      showView('iframe');
+      document.getElementById('iframe-view').src = formatEmbedUrl(data.url);
+    } else if (data.mode === 'photo' && data.photoUrl) {
+      closeWebRTC();
+      showView('photo');
+      document.getElementById('photo-view').src = data.photoUrl;
+    } else if (data.mode === 'webrtc' && data.offer) {
+      showView('video');
+      const tag = document.getElementById('stream-type-tag');
+      if (data.mediaType === 'mic') tag.innerText = '🎙️ 無線麥克風廣播中';
+      else if (data.mediaType === 'video-file') tag.innerText = '🎬 手機影片播放中';
+      else tag.innerText = '🎥 無線實物鏡頭中';
+      
+      // 🌟 關鍵修復：收到 WebRTC 訊號前先強制清理舊連線，避免舊物件卡死
+      closeWebRTC();
+      await handleWebRTCOffer(data.offer, data.mediaType);
+    } else if (data.mode === 'idle') {
       resetUI();
+    }
+  });
+
+  // 2. 實時畫筆筆跡
+  const drawEventsRef = ref(db, `screens/${screenId}/drawEvents`);
+  onChildAdded(drawEventsRef, (snapshot) => {
+    const d = snapshot.val();
+    if (d) {
+      ctx.beginPath();
+      ctx.moveTo(d.x0 * canvas.width, d.y0 * canvas.height);
+      ctx.lineTo(d.x1 * canvas.width, d.y1 * canvas.height);
+      
+      if (d.isEraser) {
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.lineWidth = d.size || 20;
+      } else {
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.strokeStyle = d.color;
+        ctx.lineWidth = d.size || 4;
+      }
+
+      ctx.lineCap = 'round';
+      ctx.stroke();
+      ctx.globalCompositeOperation = 'source-over';
+    }
+  });
+
+  onValue(drawEventsRef, (snapshot) => {
+    if (!snapshot.exists()) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+  });
+
+  // 3. WebRTC P2P 影音接收
+  async function handleWebRTCOffer(offer, mediaType) {
+    peerConnection = new RTCPeerConnection(rtcConfig);
+    
+    peerConnection.ontrack = (event) => {
+      const remoteVideo = document.getElementById('remote-video');
+      if (remoteVideo.srcObject !== event.streams[0]) {
+        remoteVideo.srcObject = event.streams[0];
+        
+        // 🌟 關鍵修復：先以靜音播放繞過瀏覽器自動播放限制，播放成功後再開啟聲音
+        remoteVideo.muted = true;
+        remoteVideo.play().then(() => {
+          if (mediaType === 'video-file' || mediaType === 'mic') {
+            remoteVideo.muted = false; // 播放啟動後解除靜音
+          }
+        }).catch(err => {
+          console.warn("自動播放被攔截，維持靜音播放:", err);
+          remoteVideo.muted = true;
+          remoteVideo.play();
+        });
+      }
     };
-  </script>
+
+    peerConnection.onicecandidate = (event) => {
+      if (event.candidate) {
+        push(ref(db, `screens/${screenId}/calleeCandidates`), event.candidate.toJSON());
+      }
+    };
+
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+    set(ref(db, `screens/${screenId}/answer`), { type: answer.type, sdp: answer.sdp });
+
+    onChildAdded(ref(db, `screens/${screenId}/callerCandidates`), (snapshot) => {
+      if (snapshot.val()) {
+        peerConnection.addIceCandidate(new RTCIceCandidate(snapshot.val()));
+      }
+    });
+  }
+
+  function closeWebRTC() {
+    if (peerConnection) { peerConnection.close(); peerConnection = null; }
+    const remoteVideo = document.getElementById('remote-video');
+    if (remoteVideo.srcObject) {
+      remoteVideo.srcObject.getTracks().forEach(track => track.stop());
+      remoteVideo.srcObject = null;
+    }
+  }
+
+  function showView(type) {
+    document.getElementById('qrcode-view').style.display = 'none';
+    document.getElementById('iframe-view').style.display = type === 'iframe' ? 'block' : 'none';
+    document.getElementById('photo-view').style.display = type === 'photo' ? 'block' : 'none';
+    document.getElementById('video-container').style.display = type === 'video' ? 'block' : 'none';
+    document.getElementById('reset-btn').style.display = 'block';
+  }
+
+  function resetUI() {
+    closeWebRTC();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    document.getElementById('iframe-view').src = "about:blank";
+    document.getElementById('photo-view').src = "";
+    document.getElementById('iframe-view').style.display = 'none';
+    document.getElementById('photo-view').style.display = 'none';
+    document.getElementById('video-container').style.display = 'none';
+    document.getElementById('qrcode-view').style.display = 'flex';
+    document.getElementById('reset-btn').style.display = 'none';
+  }
+
+  window.resetScreen = function() {
+    remove(screenRef);
+    set(screenRef, { mode: 'idle' });
+    resetUI();
+  };
+</script>
 </body>
 </html>
