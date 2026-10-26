@@ -146,7 +146,7 @@
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getDatabase, ref, set, onValue, push, onChildAdded, remove, off } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+    import { getDatabase, ref, set, onValue, push, onChildAdded, remove, off, update } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyBWa8b0rQl-qj-IWjP5hZntEi4ud_cOeVA",
@@ -270,7 +270,7 @@
       reader.readAsDataURL(file);
     };
 
-    // 建立 WebRTC
+    // 🌟 修正：建立 WebRTC 時使用 update() 增量寫入，防止網路候選封包被覆蓋擦除
     async function setupWebRTC(stream, mediaType) {
       const screenId = getScreenId(); if (!screenId) return;
 
@@ -305,7 +305,8 @@
       const offer = await peerConnection.createOffer();
       await peerConnection.setLocalDescription(offer);
 
-      await set(ref(db, `screens/${screenId}`), {
+      // 🌟 使用 update 防止 overwrite 刪除 callerCandidates
+      await update(ref(db, `screens/${screenId}`), {
         mode: 'webrtc',
         mediaType: mediaType,
         offer: { type: offer.type, sdp: offer.sdp }
@@ -354,7 +355,7 @@
         let stream = null;
         const captureFn = (videoEl.captureStream || videoEl.webkitCaptureStream || videoEl.mozCaptureStream);
         if (captureFn) {
-          try { stream = captureFn.call(videoEl); } catch (err) { console.log('使用 Canvas 轉接'); }
+          try { stream = captureFn.call(videoEl); } catch (err) { console.log('切換為 Canvas 轉接'); }
         }
 
         if (!stream || stream.getVideoTracks().length === 0) {
@@ -401,8 +402,9 @@
 
     window.startWebRTC = async function(type) {
       try {
+        // 🌟 彈性相容 iOS Safari 鏡頭參數
         const constraints = type === 'camera' 
-          ? { video: { facingMode: "environment" }, audio: false }
+          ? { video: { facingMode: { ideal: "environment" } }, audio: false }
           : { video: false, audio: true };
 
         localStream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -410,6 +412,8 @@
         if (type === 'camera') {
           const preview = document.getElementById('local-preview');
           preview.srcObject = localStream;
+          // 🌟 關鍵補強：iOS Safari 上必須顯式呼叫 play()
+          preview.play().catch(e => console.log("Safari 鏡頭預覽播放:", e));
           document.getElementById('camera-fullscreen-overlay').style.display = 'block';
           resizeLiveCanvas();
         }
