@@ -172,8 +172,7 @@
     const rtcConfig = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' }
+        { urls: 'stun:stun1.l.google.com:19302' }
       ]
     };
 
@@ -271,12 +270,11 @@
       reader.readAsDataURL(file);
     };
 
-    // WebRTC 建立 (含 Candidate 佇列暫存修復)
+    // 建立 WebRTC
     async function setupWebRTC(stream, mediaType) {
       const screenId = getScreenId(); if (!screenId) return;
 
       stopWebRTC();
-
       await remove(ref(db, 'screens/' + screenId));
 
       peerConnection = new RTCPeerConnection(rtcConfig);
@@ -286,7 +284,6 @@
         stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
       }
 
-      // 監聽大屏傳回的 Candidates，若未 ready 先推入佇列
       calleeCandidatesRef = ref(db, `screens/${screenId}/calleeCandidates`);
       onChildAdded(calleeCandidatesRef, (snapshot) => {
         if (snapshot.val()) {
@@ -319,7 +316,6 @@
         const ans = snap.val();
         if (ans && peerConnection && peerConnection.signalingState !== 'stable') {
           await peerConnection.setRemoteDescription(new RTCSessionDescription(ans)).catch(e => console.error(e));
-          // 遠端描述就緒後，一次性消化佇列中的 Candidate
           while (iceCandidateQueue.length > 0) {
             const cand = iceCandidateQueue.shift();
             await peerConnection.addIceCandidate(cand).catch(e => console.error(e));
@@ -358,7 +354,7 @@
         let stream = null;
         const captureFn = (videoEl.captureStream || videoEl.webkitCaptureStream || videoEl.mozCaptureStream);
         if (captureFn) {
-          try { stream = captureFn.call(videoEl); } catch (err) { console.log('切換為 Canvas 轉接'); }
+          try { stream = captureFn.call(videoEl); } catch (err) { console.log('使用 Canvas 轉接'); }
         }
 
         if (!stream || stream.getVideoTracks().length === 0) {
