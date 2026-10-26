@@ -77,7 +77,14 @@
     const screenRef = ref(db, 'screens/' + screenId);
     let peerConnection = null;
     let callerCandidatesRef = null;
-    const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+    let iceCandidateQueue = [];
+    const rtcConfig = {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' }
+      ]
+    };
 
     function formatEmbedUrl(url) {
       if (!url) return url;
@@ -137,17 +144,19 @@
       closeWebRTC();
 
       peerConnection = new RTCPeerConnection(rtcConfig);
+      iceCandidateQueue = [];
       
       peerConnection.ontrack = (event) => {
         const remoteVideo = document.getElementById('remote-video');
         if (remoteVideo.srcObject !== event.streams[0]) {
           remoteVideo.srcObject = event.streams[0];
-          remoteVideo.muted = (mediaType === 'camera');
-          remoteVideo.play().catch(err => {
-            console.warn("自動播放受阻，嘗試靜音播放:", err);
-            remoteVideo.muted = true;
-            remoteVideo.play();
-          });
+          // 率先靜音起播，確保 100% 消除轉圈
+          remoteVideo.muted = true;
+          remoteVideo.play().then(() => {
+            if (mediaType === 'video-file' || mediaType === 'mic') {
+              setTimeout(() => { remoteVideo.muted = false; }, 300);
+            }
+          }).catch(err => console.warn("播放受阻，保持靜音:", err));
         }
       };
 
@@ -158,14 +167,26 @@
       };
 
       await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+
+      // 清空暫存的 Candidate 佇列
+      while (iceCandidateQueue.length > 0) {
+        const cand = iceCandidateQueue.shift();
+        await peerConnection.addIceCandidate(cand).catch(e => console.error(e));
+      }
+
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
       await set(ref(db, `screens/${screenId}/answer`), { type: answer.type, sdp: answer.sdp });
 
       callerCandidatesRef = ref(db, `screens/${screenId}/callerCandidates`);
       onChildAdded(callerCandidatesRef, (snapshot) => {
-        if (snapshot.val() && peerConnection && peerConnection.remoteDescription) {
-          peerConnection.addIceCandidate(new RTCIceCandidate(snapshot.val())).catch(e => console.error(e));
+        if (snapshot.val()) {
+          const candidate = new RTCIceCandidate(snapshot.val());
+          if (peerConnection && peerConnection.remoteDescription) {
+            peerConnection.addIceCandidate(candidate).catch(e => console.error(e));
+          } else {
+            iceCandidateQueue.push(candidate);
+          }
         }
       });
     }
@@ -173,6 +194,7 @@
     function closeWebRTC() {
       if (callerCandidatesRef) { off(callerCandidatesRef); callerCandidatesRef = null; }
       if (peerConnection) { peerConnection.close(); peerConnection = null; }
+      iceCandidateQueue = [];
       const remoteVideo = document.getElementById('remote-video');
       if (remoteVideo.srcObject) {
         remoteVideo.srcObject.getTracks().forEach(track => track.stop());
