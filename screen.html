@@ -80,12 +80,7 @@
     let currentOfferSdp = null;
     let iceCandidateQueue = [];
 
-    const rtcConfig = {
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
-      ]
-    };
+    const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
     function formatEmbedUrl(url) {
       if (!url) return url;
@@ -110,7 +105,7 @@
         showView('video');
         const tag = document.getElementById('stream-type-tag');
         if (data.mediaType === 'mic') tag.innerText = '🎙️ 無線麥克風廣播中';
-        else if (data.mediaType === 'video-file') tag.innerText = '🎬 手機影片播放中';
+        else if (data.mediaType.startsWith('video-file')) tag.innerText = '🎬 手機影片播放中';
         else tag.innerText = '🎥 無線實物鏡頭中';
         
         if (data.offer.sdp !== currentOfferSdp) {
@@ -152,17 +147,47 @@
       peerConnection = new RTCPeerConnection(rtcConfig);
       iceCandidateQueue = [];
       
+      // 處理影音串流 (鏡頭與麥克風)
       peerConnection.ontrack = (event) => {
         const remoteVideo = document.getElementById('remote-video');
         if (remoteVideo.srcObject !== event.streams[0]) {
           remoteVideo.srcObject = event.streams[0];
-          remoteVideo.muted = true;
-          remoteVideo.play().then(() => {
-            if (mediaType === 'video-file' || mediaType === 'mic') {
-              setTimeout(() => { remoteVideo.muted = false; }, 300);
-            }
-          }).catch(err => console.warn("播放中:", err));
+          remoteVideo.muted = (mediaType === 'camera');
+          remoteVideo.play().catch(err => console.warn("播放中:", err));
         }
+      };
+
+      // 🌟 處理 DataChannel 影片快傳 (專為 iOS Safari 影片解決)
+      peerConnection.ondatachannel = (event) => {
+        const receiveChannel = event.channel;
+        let fileChunks = [];
+        let fileHeader = null;
+        let receivedSize = 0;
+
+        receiveChannel.binaryType = 'arraybuffer';
+        receiveChannel.onmessage = (e) => {
+          if (typeof e.data === 'string') {
+            const data = JSON.parse(e.data);
+            if (data.type === 'header') {
+              fileHeader = data;
+              fileChunks = [];
+              receivedSize = 0;
+            }
+          } else {
+            fileChunks.push(e.data);
+            receivedSize += e.data.byteLength;
+
+            if (fileHeader && receivedSize >= fileHeader.size) {
+              const blob = new Blob(fileChunks, { type: fileHeader.mime });
+              const videoUrl = URL.createObjectURL(blob);
+              const remoteVideo = document.getElementById('remote-video');
+              remoteVideo.srcObject = null;
+              remoteVideo.src = videoUrl;
+              remoteVideo.muted = false;
+              remoteVideo.play().catch(err => console.warn("影片播放限制:", err));
+            }
+          }
+        };
       };
 
       peerConnection.onicecandidate = (event) => {
@@ -203,6 +228,10 @@
       if (remoteVideo.srcObject) {
         remoteVideo.srcObject.getTracks().forEach(track => track.stop());
         remoteVideo.srcObject = null;
+      }
+      if (remoteVideo.src) {
+        remoteVideo.removeAttribute('src');
+        remoteVideo.load();
       }
     }
 
