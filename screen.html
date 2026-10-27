@@ -13,20 +13,27 @@
     .pin-code { font-size: 4rem; font-weight: bold; color: #4dabf7; letter-spacing: 5px; margin: 10px 0; }
     #qrcode { background: #fff; padding: 15px; border-radius: 12px; margin: 15px 0; }
     
-    #iframe-view, #photo-view, #video-container { 
+    #iframe-view, #media-viewport, #video-container { 
       display: none; position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; border: none; background: #000; z-index: 10;
     }
-    
-    #photo-view { object-fit: contain; width: 100%; height: 100%; }
+
+    /* 🌟 全螢幕媒體與縮放層 */
+    #media-viewport { overflow: hidden; touch-action: none; }
+    #zoom-layer {
+      width: 100vw; height: 100vh; position: absolute; top: 0; left: 0;
+      display: flex; justify-content: center; align-items: center;
+      transform-origin: center center; will-change: transform;
+    }
+
+    #photo-view { max-width: 100%; max-height: 100%; object-fit: contain; pointer-events: none; }
+    #annotation-canvas { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: auto; cursor: crosshair; }
+
     #remote-video { width: 100%; height: 100%; object-fit: contain; }
     .live-badge { position: absolute; top: 20px; left: 20px; background: rgba(255, 59, 48, 0.9); color: white; padding: 6px 14px; border-radius: 20px; font-weight: bold; font-size: 0.9rem; z-index: 20; }
     
-    /* 標註畫布置頂並允許觸控滑鼠繪製 */
-    #annotation-canvas { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: auto; z-index: 99; cursor: crosshair; }
-    
     #reset-btn { position: fixed; bottom: 20px; right: 20px; z-index: 999; background: rgba(0,0,0,0.8); color: white; border: 1px solid #555; padding: 10px 20px; border-radius: 20px; cursor: pointer; display: none; }
 
-    /* 🌟 大屏底部翻頁列 */
+    /* 大屏底部翻頁列 */
     #screen-pager-bar {
       display: none; position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
       background: rgba(0,0,0,0.85); padding: 8px 18px; border-radius: 30px; z-index: 1000;
@@ -34,7 +41,7 @@
     }
     .screen-pager-btn { background: #007aff; color: white; border: none; padding: 8px 16px; border-radius: 20px; font-weight: bold; font-size: 0.9rem; cursor: pointer; }
 
-    /* 🌟 大屏右上角標註工具列 */
+    /* 🌟 大屏右上角工具列（含移動/縮放控制） */
     #screen-draw-toolbar {
       display: none; position: fixed; top: 20px; right: 20px; background: rgba(0,0,0,0.85);
       padding: 8px 14px; border-radius: 30px; z-index: 1000; align-items: center; gap: 8px;
@@ -43,6 +50,7 @@
     .screen-color-btn { width: 26px; height: 26px; border-radius: 50%; border: 2px solid #fff; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.3); }
     .screen-tool-btn { padding: 5px 12px; border-radius: 15px; border: none; background: #555; color: white; font-size: 0.85rem; font-weight: bold; cursor: pointer; }
     .screen-tool-btn.active { background: #ff9500; }
+    .toolbar-divider { width: 1px; height: 18px; background: rgba(255,255,255,0.3); margin: 0 2px; }
   </style>
 </head>
 <body>
@@ -56,14 +64,19 @@
   </div>
 
   <iframe id="iframe-view" src="about:blank"></iframe>
-  <img id="photo-view" src="" alt="推送的照片/PDF">
+
+  <!-- 🌟 照片與 PDF 展示全螢幕縮放層 -->
+  <div id="media-viewport">
+    <div id="zoom-layer">
+      <img id="photo-view" src="" alt="推送的照片/PDF">
+      <canvas id="annotation-canvas"></canvas>
+    </div>
+  </div>
 
   <div id="video-container">
     <div class="live-badge" id="stream-type-tag">🔴 實況傳輸中</div>
     <video id="remote-video" autoplay playsinline controls></video>
   </div>
-
-  <canvas id="annotation-canvas"></canvas>
 
   <!-- 🌟 大屏翻頁控制列 -->
   <div id="screen-pager-bar">
@@ -72,8 +85,13 @@
     <button class="screen-pager-btn" onclick="changeScreenPage(1)">下一張/頁 ►</button>
   </div>
 
-  <!-- 🌟 大屏標註工具列 -->
+  <!-- 🌟 大屏標註與縮放工具列 -->
   <div id="screen-draw-toolbar">
+    <button class="screen-tool-btn" id="screen-pan-btn" onclick="togglePanMode()" title="切換移動/標註模式">🖐️ 移動</button>
+    <button class="screen-tool-btn" onclick="zoomIn()" title="放大">🔍+</button>
+    <button class="screen-tool-btn" onclick="zoomOut()" title="縮小">🔍-</button>
+    <button class="screen-tool-btn" onclick="resetZoom()" title="重設畫面">🔄</button>
+    <div class="toolbar-divider"></div>
     <div class="screen-color-btn" style="background:#ff3b30;" onclick="setScreenPen('#ff3b30')"></div>
     <div class="screen-color-btn" style="background:#ffcc00;" onclick="setScreenPen('#ffcc00')"></div>
     <div class="screen-color-btn" style="background:#34c759;" onclick="setScreenPen('#34c759')"></div>
@@ -122,6 +140,14 @@
     let currentPhotoIndex = 1;
     let currentPhotoTotal = 1;
 
+    // 🌟 畫面縮放與平移變數
+    let scale = 1, translateX = 0, translateY = 0;
+    let activeMode = 'draw'; // 'draw' 或 'pan'
+    let isScreenDrawing = false, screenLastX = 0, screenLastY = 0;
+    let isPanning = false, panStartX = 0, panStartY = 0;
+    let initialPinchDist = null, initialScale = 1;
+    let screenColor = '#ff3b30', isScreenEraserMode = false;
+
     const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
     function formatEmbedUrl(url) {
@@ -131,7 +157,37 @@
       return url;
     }
 
-    // 1. 狀態監聽
+    function updateTransform() {
+      const zoomLayer = document.getElementById('zoom-layer');
+      if (zoomLayer) {
+        zoomLayer.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+      }
+    }
+
+    window.resetZoom = function() {
+      scale = 1; translateX = 0; translateY = 0;
+      updateTransform();
+    };
+
+    window.zoomIn = function() {
+      scale = Math.min(scale * 1.25, 8);
+      updateTransform();
+    };
+
+    window.zoomOut = function() {
+      scale = Math.max(scale / 1.25, 1);
+      if (scale === 1) { translateX = 0; translateY = 0; }
+      updateTransform();
+    };
+
+    window.togglePanMode = function() {
+      activeMode = activeMode === 'draw' ? 'pan' : 'draw';
+      const btn = document.getElementById('screen-pan-btn');
+      if (btn) btn.classList.toggle('active', activeMode === 'pan');
+      canvas.style.cursor = activeMode === 'pan' ? 'grab' : 'crosshair';
+    };
+
+    // 狀態監聽
     onValue(screenRef, async (snapshot) => {
       const data = snapshot.val();
       if (!data) return;
@@ -147,8 +203,8 @@
         currentOfferSdp = null;
         closeWebRTC(); showView('photo');
         document.getElementById('photo-view').src = data.photoUrl;
+        resetZoom(); // 換照片自動重設 100%
 
-        // 🌟 多圖 / PDF 導覽列判斷
         currentPhotoIndex = data.photoIndex || 1;
         currentPhotoTotal = data.photoTotal || 1;
         const subType = data.mediaSubtype === 'pdf' ? '頁' : '張';
@@ -183,7 +239,6 @@
       }
     });
 
-    // 🌟 大屏點擊翻頁通知手機端
     window.changeScreenPage = function(delta) {
       const target = currentPhotoIndex + delta;
       if (target >= 1 && target <= currentPhotoTotal) {
@@ -191,7 +246,7 @@
       }
     };
 
-    // 2. 實時畫筆筆跡接收 (雙向繪製)
+    // 實時畫筆筆跡接收 (雙向繪製)
     const drawEventsRef = ref(db, `screens/${screenId}/drawEvents`);
     onChildAdded(drawEventsRef, (snapshot) => {
       const d = snapshot.val();
@@ -216,10 +271,6 @@
       if (!snapshot.exists()) ctx.clearRect(0, 0, canvas.width, canvas.height);
     });
 
-    // 🌟 大屏端直接觸控 / 滑鼠塗鴉繪製邏輯
-    let isScreenDrawing = false, screenLastX = 0, screenLastY = 0;
-    let screenColor = '#ff3b30', isScreenEraserMode = false;
-
     window.setScreenPen = function(color) {
       isScreenEraserMode = false;
       screenColor = color;
@@ -236,35 +287,113 @@
       remove(ref(db, `screens/${screenId}/drawEvents`));
     };
 
+    // 🌟 轉換螢幕座標至矩陣層座標（讓畫筆筆跡在縮放/移動後依然無縫精確）
+    function getLayerCoords(clientX, clientY) {
+      const rect = canvas.getBoundingClientRect();
+      const screenX = clientX - rect.left;
+      const screenY = clientY - rect.top;
+      const cx = canvas.width / 2;
+      const cy = canvas.height / 2;
+
+      const layerX = cx + (screenX - cx - translateX) / scale;
+      const layerY = cy + (screenY - cy - translateY) / scale;
+
+      return { x: layerX, y: layerY };
+    }
+
+    // 🌟 縮放與移動觸控/滑鼠手勢處理
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85;
+      const newScale = Math.min(Math.max(1, scale * zoomFactor), 8);
+      if (newScale === 1) { translateX = 0; translateY = 0; }
+      scale = newScale;
+      updateTransform();
+    }, { passive: false });
+
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
+
     function handleScreenStart(e) {
       if (document.getElementById('qrcode-view').style.display !== 'none') return;
-      isScreenDrawing = true;
-      const rect = canvas.getBoundingClientRect();
-      const touch = e.touches ? e.touches[0] : e;
-      screenLastX = touch.clientX - rect.left;
-      screenLastY = touch.clientY - rect.top;
+
+      // 觸控雙指縮放與拖曳
+      if (e.touches && e.touches.length === 2) {
+        isPanning = true;
+        isScreenDrawing = false;
+        panStartX = (e.touches[0].clientX + e.touches[1].clientX) / 2 - translateX;
+        panStartY = (e.touches[0].clientY + e.touches[1].clientY) / 2 - translateY;
+        initialPinchDist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        initialScale = scale;
+        return;
+      }
+
+      // 切換為移動模式 / 按住滑鼠右鍵/中鍵
+      if (activeMode === 'pan' || e.button === 1 || e.button === 2) {
+        isPanning = true;
+        isScreenDrawing = false;
+        const touch = e.touches ? e.touches[0] : e;
+        panStartX = touch.clientX - translateX;
+        panStartY = touch.clientY - translateY;
+        canvas.style.cursor = 'grabbing';
+      } else {
+        isScreenDrawing = true;
+        isPanning = false;
+        const touch = e.touches ? e.touches[0] : e;
+        const coords = getLayerCoords(touch.clientX, touch.clientY);
+        screenLastX = coords.x;
+        screenLastY = coords.y;
+      }
     }
 
     function handleScreenMove(e) {
+      if (isPanning) {
+        if (e.touches && e.touches.length === 2) {
+          const currentDist = Math.hypot(
+            e.touches[0].clientX - e.touches[1].clientX,
+            e.touches[0].clientY - e.touches[1].clientY
+          );
+          if (initialPinchDist) {
+            scale = Math.min(Math.max(1, initialScale * (currentDist / initialPinchDist)), 8);
+          }
+          const currentMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+          const currentMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+          translateX = currentMidX - panStartX;
+          translateY = currentMidY - panStartY;
+          updateTransform();
+        } else {
+          const touch = e.touches ? e.touches[0] : e;
+          translateX = touch.clientX - panStartX;
+          translateY = touch.clientY - panStartY;
+          updateTransform();
+        }
+        return;
+      }
+
       if (!isScreenDrawing) return;
-      const rect = canvas.getBoundingClientRect();
       const touch = e.touches ? e.touches[0] : e;
-      const currentX = touch.clientX - rect.left;
-      const currentY = touch.clientY - rect.top;
+      const coords = getLayerCoords(touch.clientX, touch.clientY);
 
       push(ref(db, `screens/${screenId}/drawEvents`), {
         x0: screenLastX / canvas.width, y0: screenLastY / canvas.height,
-        x1: currentX / canvas.width, y1: currentY / canvas.height,
+        x1: coords.x / canvas.width, y1: coords.y / canvas.height,
         color: screenColor,
         size: isScreenEraserMode ? 20 : 4,
         isEraser: isScreenEraserMode
       });
 
-      screenLastX = currentX;
-      screenLastY = currentY;
+      screenLastX = coords.x;
+      screenLastY = coords.y;
     }
 
-    function handleScreenEnd() { isScreenDrawing = false; }
+    function handleScreenEnd() {
+      isScreenDrawing = false;
+      isPanning = false;
+      initialPinchDist = null;
+      canvas.style.cursor = activeMode === 'pan' ? 'grab' : 'crosshair';
+    }
 
     canvas.addEventListener('mousedown', handleScreenStart);
     canvas.addEventListener('mousemove', handleScreenMove);
@@ -273,7 +402,7 @@
     canvas.addEventListener('touchmove', handleScreenMove);
     canvas.addEventListener('touchend', handleScreenEnd);
 
-    // 3. WebRTC P2P 連線處理
+    // WebRTC P2P 連線處理
     async function handleWebRTCOffer(offer, mediaType) {
       peerConnection = new RTCPeerConnection(rtcConfig);
       iceCandidateQueue = [];
@@ -362,7 +491,7 @@
     function showView(type) {
       document.getElementById('qrcode-view').style.display = 'none';
       document.getElementById('iframe-view').style.display = type === 'iframe' ? 'block' : 'none';
-      document.getElementById('photo-view').style.display = type === 'photo' ? 'block' : 'none';
+      document.getElementById('media-viewport').style.display = type === 'photo' ? 'block' : 'none';
       document.getElementById('video-container').style.display = type === 'video' ? 'block' : 'none';
       document.getElementById('reset-btn').style.display = 'block';
     }
@@ -370,11 +499,12 @@
     function resetUI() {
       closeWebRTC();
       currentOfferSdp = null;
+      resetZoom();
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       document.getElementById('iframe-view').src = "about:blank";
       document.getElementById('photo-view').src = "";
       document.getElementById('iframe-view').style.display = 'none';
-      document.getElementById('photo-view').style.display = 'none';
+      document.getElementById('media-viewport').style.display = 'none';
       document.getElementById('video-container').style.display = 'none';
       document.getElementById('screen-pager-bar').style.display = 'none';
       document.getElementById('screen-draw-toolbar').style.display = 'none';
