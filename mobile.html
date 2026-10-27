@@ -42,6 +42,10 @@
       border-radius: 30px; backdrop-filter: blur(10px); z-index: 10001;
     }
     .float-btn { border: none; padding: 10px 14px; border-radius: 20px; font-size: 0.85rem; font-weight: bold; color: white; cursor: pointer; }
+
+    /* 進度條 */
+    #progress-container { display: none; margin-top: 10px; background: #e5e5ea; border-radius: 8px; overflow: hidden; height: 12px; }
+    #progress-bar { width: 0%; height: 100%; background: #34c759; transition: width 0.1s; }
   </style>
 </head>
 <body>
@@ -83,13 +87,11 @@
       <button class="action-btn" style="background: #5856d6; margin-bottom: 8px;" onclick="document.getElementById('gallery-input').click()">🖼️ 選擇手機相冊照片推送到大屏</button>
       <input type="file" id="gallery-input" accept="image/*" style="display:none;" onchange="handleGallerySelect(event)">
 
-      <button class="action-btn" style="background: #ff9500; margin-bottom: 8px;" onclick="document.getElementById('video-file-input').click()">🎬 選擇手機影片檔推送到大屏</button>
+      <button class="action-btn" style="background: #ff9500; margin-bottom: 8px;" onclick="document.getElementById('video-file-input').click()">🎬 選擇手機影片檔推送到大屏 (iOS 相容)</button>
       <input type="file" id="video-file-input" accept="video/*" style="display:none;" onchange="handleVideoFileSelect(event)">
       
-      <div id="video-file-preview-box" style="display:none; margin-top: 10px; text-align: center;">
-        <p style="font-size:0.8rem; color:#666; margin-bottom:4px;">🎬 影片串流中（請勿關閉此分頁）：</p>
-        <video id="local-video-file" playsinline webkit-playsinline loop muted controls style="width: 100%; max-height: 180px; border-radius: 8px; background: #000;"></video>
-      </div>
+      <div id="progress-container"><div id="progress-bar"></div></div>
+      <p id="upload-status" style="font-size:0.8rem; color:#007aff; text-align:center; display:none; margin-top:4px;"></p>
 
       <p style="font-size: 0.8rem; color: #8e8e93; text-align: center; margin: 10px 0;">— 或 —</p>
 
@@ -163,18 +165,14 @@
 
     let localStream = null;
     let peerConnection = null;
+    let dataChannel = null;
     let calleeCandidatesRef = null;
     let answerRef = null;
     let iceCandidateQueue = [];
     let isLiveDrawing = false;
     let isEraserMode = false;
     let currentColor = '#ff3b30';
-    const rtcConfig = {
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
-      ]
-    };
+    const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
     document.addEventListener('DOMContentLoaded', () => { loadHistory(); });
 
@@ -270,26 +268,73 @@
       reader.readAsDataURL(file);
     };
 
-    // 🌟 1. 僅關閉舊的連線通道（不干擾介面 UI）
     function closePeerConnection() {
       if (calleeCandidatesRef) { off(calleeCandidatesRef); calleeCandidatesRef = null; }
       if (answerRef) { off(answerRef); answerRef = null; }
+      if (dataChannel) { dataChannel.close(); dataChannel = null; }
       if (peerConnection) { peerConnection.close(); peerConnection = null; }
       iceCandidateQueue = [];
     }
 
-    // 🌟 2. 建立 WebRTC (不再呼叫 stopWebRTC 誤殺 UI)
-    async function setupWebRTC(stream, mediaType) {
+    // 🌟 P2P DataChannel 影片極速傳輸邏輯
+    window.handleVideoFileSelect = async function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
       const screenId = getScreenId(); if (!screenId) return;
 
-      closePeerConnection(); // 只關閉連線通道，不隱藏介面
+      closePeerConnection();
       await remove(ref(db, 'screens/' + screenId));
 
-      peerConnection = new RTCPeerConnection(rtcConfig);
+      const progressBar = document.getElementById('progress-bar');
+      const progressContainer = document.getElementById('progress-container');
+      const uploadStatus = document.getElementById('upload-status');
+      
+      progressContainer.style.display = 'block';
+      uploadStatus.style.display = 'block';
+      uploadStatus.innerText = '⚡ 正在建立 P2P 點對點連線...';
+      progressBar.style.width = '0%';
 
-      if (stream) {
-        stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
-      }
+      peerConnection = new RTCPeerConnection(rtcConfig);
+      dataChannel = peerConnection.createDataChannel('fileTransfer');
+      dataChannel.binaryType = 'arraybuffer';
+
+      dataChannel.onopen = async () => {
+        uploadStatus.innerText = '🚀 開始點對點傳輸影片檔...';
+        
+        // 1. 先發送檔名與大小資訊
+        dataChannel.send(JSON.stringify({ type: 'header', size: file.size, mime: file.type || 'video/mp4' }));
+
+        // 2. 切塊傳送 (64KB/chunk)
+        const chunkSize = 64 * 1024;
+        let offset = 0;
+        const reader = new FileReader();
+
+        reader.onload = (event) => {
+          dataChannel.send(event.target.result);
+          offset += event.target.result.byteLength;
+          const percent = Math.round((offset / file.size) * 100);
+          progressBar.style.width = percent + '%';
+          uploadStatus.innerText = `🚀 點對點極速傳輸中：${percent}%`;
+
+          if (offset < file.size) {
+            // 避免 DataChannel 緩衝區溢位
+            if (dataChannel.bufferedAmount > 8 * 1024 * 1024) {
+              setTimeout(readNextChunk, 100);
+            } else {
+              readNextChunk();
+            }
+          } else {
+            uploadStatus.innerText = '✓ 影片已被大屏順利接收並開始播放！';
+          }
+        };
+
+        function readNextChunk() {
+          const slice = file.slice(offset, offset + chunkSize);
+          reader.readAsArrayBuffer(slice);
+        }
+
+        readNextChunk();
+      };
 
       calleeCandidatesRef = ref(db, `screens/${screenId}/calleeCandidates`);
       onChildAdded(calleeCandidatesRef, (snapshot) => {
@@ -314,7 +359,7 @@
 
       await update(ref(db, `screens/${screenId}`), {
         mode: 'webrtc',
-        mediaType: mediaType,
+        mediaType: 'video-file-datachannel',
         offer: { type: offer.type, sdp: offer.sdp }
       });
 
@@ -329,85 +374,9 @@
           }
         }
       });
-    }
-
-    // 手機選擇影片
-    window.handleVideoFileSelect = async function(e) {
-      try {
-        const file = e.target.files[0];
-        if (!file) return;
-
-        const videoEl = document.getElementById('local-video-file');
-        const previewBox = document.getElementById('video-file-preview-box');
-
-        if (previewBox) previewBox.style.display = 'block';
-
-        videoEl.muted = true;
-        videoEl.playsInline = true;
-        videoEl.setAttribute('playsinline', '');
-        videoEl.setAttribute('webkit-playsinline', '');
-        videoEl.src = URL.createObjectURL(file);
-
-        await new Promise((resolve, reject) => {
-          const timer = setTimeout(() => reject(new Error('影片載入超時')), 10000);
-          if (videoEl.readyState >= 1) { clearTimeout(timer); resolve(); }
-          else {
-            videoEl.onloadedmetadata = () => { clearTimeout(timer); resolve(); };
-            videoEl.onerror = (err) => { clearTimeout(timer); reject(err); };
-          }
-        });
-
-        await videoEl.play();
-
-        let stream = null;
-        const captureFn = (videoEl.captureStream || videoEl.webkitCaptureStream || videoEl.mozCaptureStream);
-        if (captureFn) {
-          try { stream = captureFn.call(videoEl); } catch (err) { console.log('切換為 Canvas 轉接'); }
-        }
-
-        if (!stream || stream.getVideoTracks().length === 0) {
-          const canvas = document.createElement('canvas');
-          canvas.width = videoEl.videoWidth || 640;
-          canvas.height = videoEl.videoHeight || 360;
-          const ctx = canvas.getContext('2d');
-
-          function drawFrame() {
-            if (!videoEl.paused && !videoEl.ended) {
-              ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-              requestAnimationFrame(drawFrame);
-            }
-          }
-          drawFrame();
-
-          const canvasStream = canvas.captureStream(25);
-          const tracks = [...canvasStream.getVideoTracks()];
-
-          try {
-            const AudioContext = window.AudioContext || window.webkitAudioContext;
-            if (AudioContext) {
-              const audioCtx = new AudioContext();
-              if (audioCtx.state === 'suspended') await audioCtx.resume();
-              const source = audioCtx.createMediaElementSource(videoEl);
-              const dest = audioCtx.createMediaStreamDestination();
-              source.connect(dest);
-              if (dest.stream.getAudioTracks().length > 0) {
-                tracks.push(dest.stream.getAudioTracks()[0]);
-              }
-            }
-          } catch (audioErr) { console.warn('音訊略過:', audioErr); }
-
-          stream = new MediaStream(tracks);
-        }
-
-        await setupWebRTC(stream, 'video-file');
-        alert('✓ 手機影片已開始串流推送至大屏！');
-
-      } catch (err) {
-        alert('影片開啟失敗：' + (err.message || err));
-      }
     };
 
-    // 啟動實時鏡頭
+    // 啟動實時鏡頭與麥克風
     window.startWebRTC = async function(type) {
       try {
         const constraints = type === 'camera' 
@@ -424,12 +393,54 @@
           resizeLiveCanvas();
         }
 
-        await setupWebRTC(localStream, type);
+        closePeerConnection();
+        const screenId = getScreenId(); if (!screenId) return;
+        await remove(ref(db, 'screens/' + screenId));
+
+        peerConnection = new RTCPeerConnection(rtcConfig);
+        localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+
+        calleeCandidatesRef = ref(db, `screens/${screenId}/calleeCandidates`);
+        onChildAdded(calleeCandidatesRef, (snapshot) => {
+          if (snapshot.val()) {
+            const candidate = new RTCIceCandidate(snapshot.val());
+            if (peerConnection && peerConnection.remoteDescription) {
+              peerConnection.addIceCandidate(candidate).catch(e => console.error(e));
+            } else {
+              iceCandidateQueue.push(candidate);
+            }
+          }
+        });
+
+        peerConnection.onicecandidate = (event) => {
+          if (event.candidate) push(ref(db, `screens/${screenId}/callerCandidates`), event.candidate.toJSON());
+        };
+
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+
+        await update(ref(db, `screens/${screenId}`), {
+          mode: 'webrtc',
+          mediaType: type,
+          offer: { type: offer.type, sdp: offer.sdp }
+        });
+
+        answerRef = ref(db, `screens/${screenId}/answer`);
+        onValue(answerRef, async (snap) => {
+          const ans = snap.val();
+          if (ans && peerConnection && peerConnection.signalingState !== 'stable') {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(ans)).catch(e => console.error(e));
+            while (iceCandidateQueue.length > 0) {
+              const cand = iceCandidateQueue.shift();
+              await peerConnection.addIceCandidate(cand).catch(e => console.error(e));
+            }
+          }
+        });
+
         toggleMediaUI(type, true);
       } catch (err) { alert('請確保已給予鏡頭/麥克風權限：' + err.message); }
     };
 
-    // 🌟 3. 完全關閉並隱藏介面 (點擊關閉按鈕時才執行)
     window.stopWebRTC = function() {
       closePeerConnection();
 
@@ -438,10 +449,8 @@
         localStream = null;
       }
 
-      const videoEl = document.getElementById('local-video-file');
-      const previewBox = document.getElementById('video-file-preview-box');
-      if (videoEl) { videoEl.pause(); videoEl.src = ""; }
-      if (previewBox) previewBox.style.display = 'none';
+      document.getElementById('progress-container').style.display = 'none';
+      document.getElementById('upload-status').style.display = 'none';
 
       document.getElementById('camera-fullscreen-overlay').style.display = 'none';
       document.getElementById('live-color-bar').style.display = 'none';
