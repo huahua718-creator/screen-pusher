@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>傳屏遙控器</title>
+  <!-- 引入 PDF.js 解析引擎 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <style>
     body { font-family: sans-serif; padding: 12px; background: #f2f2f7; color: #333; margin: 0; }
     .card { background: white; padding: 16px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); margin-bottom: 12px; }
@@ -36,7 +38,6 @@
     #local-preview { width: 100%; height: 100%; object-fit: cover; }
     #live-draw-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; touch-action: none; pointer-events: none; }
     
-    /* 🌟 修改：頂部懸浮工具列，改置於頂部 (top: 20px) 避免遮擋 */
     .floating-bar { 
       position: absolute; top: 20px; left: 50%; transform: translateX(-50%); 
       display: flex; gap: 12px; background: rgba(0,0,0,0.75); padding: 8px 16px; 
@@ -44,9 +45,12 @@
     }
     .float-btn { border: none; padding: 8px 16px; border-radius: 20px; font-size: 1.3rem; font-weight: bold; color: white; cursor: pointer; }
 
-    /* 進度條 */
     #progress-container { display: none; margin-top: 10px; background: #e5e5ea; border-radius: 8px; overflow: hidden; height: 12px; }
     #progress-bar { width: 0%; height: 100%; background: #34c759; transition: width 0.1s; }
+
+    /* 多圖與 PDF 控制控制列樣式 */
+    .nav-pager-box { display: none; margin-top: 10px; padding: 8px; background: #e5e5ea; border-radius: 8px; text-align: center; }
+    .nav-pager-btn { padding: 6px 16px; border-radius: 6px; border: none; background: #007aff; color: white; font-weight: bold; cursor: pointer; }
   </style>
 </head>
 <body>
@@ -85,10 +89,30 @@
     <div id="camera-tab" class="tab-content card">
       <label>媒體推送方式：</label>
 
-      <button class="action-btn" style="background: #5856d6; margin-bottom: 8px;" onclick="document.getElementById('gallery-input').click()">🖼️ 選擇手機相冊照片推送到大屏</button>
-      <input type="file" id="gallery-input" accept="image/*" style="display:none;" onchange="handleGallerySelect(event)">
+      <!-- 多圖選擇 -->
+      <button class="action-btn" style="background: #5856d6; margin-bottom: 8px;" onclick="document.getElementById('gallery-input').click()">🖼️ 選擇照片（可複選多張相片）</button>
+      <input type="file" id="gallery-input" accept="image/*" multiple style="display:none;" onchange="handleGallerySelect(event)">
+      
+      <!-- 相片導覽列 -->
+      <div id="photo-pager" class="nav-pager-box">
+        <button class="nav-pager-btn" onclick="prevPhoto()">◄ 上一張</button>
+        <span id="photo-indicator" style="margin: 0 10px; font-weight:bold; font-size:0.9rem;">1 / 1</span>
+        <button class="nav-pager-btn" onclick="nextPhoto()">下一張 ►</button>
+      </div>
 
-      <button class="action-btn" style="background: #ff9500; margin-bottom: 8px;" onclick="document.getElementById('video-file-input').click()">🎬 選擇手機影片檔推送到大屏</button>
+      <!-- PDF 文件選擇 -->
+      <button class="action-btn" style="background: #e0245e; margin-bottom: 8px; margin-top: 8px;" onclick="document.getElementById('pdf-input').click()">📄 選擇 PDF 文件推送到大屏</button>
+      <input type="file" id="pdf-input" accept="application/pdf" style="display:none;" onchange="handlePdfSelect(event)">
+
+      <!-- PDF 頁數導覽列 -->
+      <div id="pdf-pager" class="nav-pager-box">
+        <button class="nav-pager-btn" onclick="prevPdfPage()">◄ 上一頁</button>
+        <span id="pdf-indicator" style="margin: 0 10px; font-weight:bold; font-size:0.9rem;">第 1 / 1 頁</span>
+        <button class="nav-pager-btn" onclick="nextPdfPage()">下一頁 ►</button>
+      </div>
+
+      <!-- 影片檔選擇 -->
+      <button class="action-btn" style="background: #ff9500; margin-bottom: 8px; margin-top: 8px;" onclick="document.getElementById('video-file-input').click()">🎬 選擇手機影片檔推送到大屏</button>
       <input type="file" id="video-file-input" accept="video/*" style="display:none;" onchange="handleVideoFileSelect(event)">
       
       <div id="progress-container"><div id="progress-bar"></div></div>
@@ -96,6 +120,7 @@
 
       <p style="font-size: 0.8rem; color: #8e8e93; text-align: center; margin: 10px 0;">— 或 —</p>
 
+      <!-- 實況鏡頭 -->
       <button id="cam-start-btn" class="action-btn push-btn" onclick="startWebRTC('camera')">🎥 開啟手機全螢幕實時鏡頭</button>
     </div>
 
@@ -127,7 +152,7 @@
     </div>
   </div>
 
-  <!-- 🌟 修改：全螢幕鏡頭懸浮工具列，改置於頂部並簡化為圖標 -->
+  <!-- 全螢幕鏡頭與懸浮工具列 -->
   <div id="camera-fullscreen-overlay">
     <video id="local-preview" autoplay playsinline muted></video>
     <canvas id="live-draw-canvas"></canvas>
@@ -138,7 +163,6 @@
       <button class="float-btn" style="background:#ff3b30;" onclick="stopWebRTC()" title="關閉鏡頭">❌</button>
     </div>
 
-    <!-- 調色盤位址調整至懸浮列下方 (top: 75px) -->
     <div id="live-color-bar" class="tool-bar" style="display:none; position:absolute; top:75px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.75); padding:8px 15px; border-radius:25px; z-index:10001;">
       <div class="color-btn" style="background:#ff3b30;" onclick="selectPen('#ff3b30')"></div>
       <div class="color-btn" style="background:#ffcc00;" onclick="selectPen('#ffcc00')"></div>
@@ -152,6 +176,9 @@
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
     import { getDatabase, ref, set, onValue, push, onChildAdded, remove, off, update } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+
+    // 設定 PDF.js Worker
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
     const firebaseConfig = {
       apiKey: "AIzaSyBWa8b0rQl-qj-IWjP5hZntEi4ud_cOeVA",
@@ -175,6 +202,13 @@
     let isLiveDrawing = false;
     let isEraserMode = false;
     let currentColor = '#ff3b30';
+
+    // 多圖與 PDF 狀態變數
+    let photoList = [];
+    let currentPhotoIndex = 0;
+    let pdfDoc = null;
+    let currentPdfPage = 1;
+
     const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
     document.addEventListener('DOMContentLoaded', () => { loadHistory(); });
@@ -231,51 +265,138 @@
       }
     };
 
-    // 🌟 修改：推送網址時自動補全 http:// (若原本沒有 http:// 或 https://)
+    // 網址推送
     window.sendUrl = function() {
       const screenId = getScreenId(); if (!screenId) return;
       stopWebRTC();
       let url = document.getElementById('url-input').value.trim();
       const name = document.getElementById('url-name-input').value.trim();
-      
       if (url) {
-        if (!/^https?:\/\//i.test(url)) {
-          url = 'http://' + url;
-        }
+        if (!/^https?:\/\//i.test(url)) url = 'http://' + url;
         saveToHistory(url, name);
       }
       set(ref(db, 'screens/' + screenId), { mode: 'url', url: url, updatedAt: Date.now() });
     };
 
-    window.handleGallerySelect = function(e) {
+    // 🌟 多圖選取與推送 (方案 A：切換相片時自動清空畫筆)
+    window.handleGallerySelect = async function(e) {
+      const files = Array.from(e.target.files);
+      if (files.length === 0) return;
+
+      photoList = [];
+      currentPhotoIndex = 0;
+
+      for (const file of files) {
+        const dataUrl = await processImageFile(file);
+        photoList.push(dataUrl);
+      }
+
+      document.getElementById('pdf-pager').style.display = 'none';
+      if (photoList.length > 1) {
+        document.getElementById('photo-pager').style.display = 'block';
+      } else {
+        document.getElementById('photo-pager').style.display = 'none';
+      }
+
+      sendPhotoIndex(0);
+    };
+
+    function processImageFile(file) {
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = function(evt) {
+          const img = new Image();
+          img.onload = function() {
+            const canvas = document.createElement('canvas');
+            let w = img.width, h = img.height, maxDim = 1280;
+            if (w > maxDim || h > maxDim) {
+              if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
+              else { w = Math.round((w * maxDim) / h); h = maxDim; }
+            }
+            canvas.width = w; canvas.height = h;
+            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+            resolve(canvas.toDataURL('image/jpeg', 0.75));
+          };
+          img.src = evt.target.result;
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function sendPhotoIndex(index) {
+      if (index < 0 || index >= photoList.length) return;
+      currentPhotoIndex = index;
+      document.getElementById('photo-indicator').innerText = `${currentPhotoIndex + 1} / ${photoList.length}`;
+
+      const dataUrl = photoList[currentPhotoIndex];
+      stopWebRTC();
+      setPadBackground(dataUrl);
+
+      const screenId = getScreenId(); if (!screenId) return;
+      // 🌟 方案 A：換照片時自動清空舊筆跡
+      remove(ref(db, `screens/${screenId}/drawEvents`));
+      set(ref(db, 'screens/' + screenId), { mode: 'photo', photoUrl: dataUrl, updatedAt: Date.now() }).then(() => {
+        document.getElementById('draw-tab-btn').click();
+      });
+    }
+
+    window.prevPhoto = function() { sendPhotoIndex(currentPhotoIndex - 1); };
+    window.nextPhoto = function() { sendPhotoIndex(currentPhotoIndex + 1); };
+
+    // 🌟 📄 PDF 選取、逐頁解析與翻頁標註
+    window.handlePdfSelect = async function(e) {
       const file = e.target.files[0];
       if (!file) return;
-      const reader = new FileReader();
-      reader.onload = function(evt) {
-        const img = new Image();
-        img.onload = function() {
-          const canvas = document.createElement('canvas');
-          let w = img.width, h = img.height, maxDim = 1280;
-          if (w > maxDim || h > maxDim) {
-            if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
-            else { w = Math.round((w * maxDim) / h); h = maxDim; }
-          }
-          canvas.width = w; canvas.height = h;
-          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
 
-          stopWebRTC();
-          setPadBackground(dataUrl);
-
-          const screenId = getScreenId(); if (!screenId) return;
-          remove(ref(db, `screens/${screenId}/drawEvents`));
-          set(ref(db, 'screens/' + screenId), { mode: 'photo', photoUrl: dataUrl, updatedAt: Date.now() }).then(() => {
-            document.getElementById('draw-tab-btn').click();
-          });
-        };
-        img.src = evt.target.result;
+      document.getElementById('photo-pager').style.display = 'none';
+      const fileReader = new FileReader();
+      fileReader.onload = async function() {
+        const typedarray = new Uint8Array(this.result);
+        pdfDoc = await pdfjsLib.getDocument(typedarray).promise;
+        currentPdfPage = 1;
+        document.getElementById('pdf-pager').style.display = 'block';
+        renderAndSendPdfPage(currentPdfPage);
       };
-      reader.readAsDataURL(file);
+      fileReader.readAsArrayBuffer(file);
+    };
+
+    async function renderAndSendPdfPage(pageNum) {
+      if (!pdfDoc) return;
+      const page = await pdfDoc.getPage(pageNum);
+      const viewport = page.getViewport({ scale: 1.5 });
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+
+      await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+
+      document.getElementById('pdf-indicator').innerText = `第 ${pageNum} / ${pdfDoc.numPages} 頁`;
+
+      stopWebRTC();
+      setPadBackground(dataUrl);
+
+      const screenId = getScreenId(); if (!screenId) return;
+      // 🌟 方案 A：換 PDF 頁數時自動清空舊筆跡
+      remove(ref(db, `screens/${screenId}/drawEvents`));
+      set(ref(db, 'screens/' + screenId), { mode: 'photo', photoUrl: dataUrl, updatedAt: Date.now() }).then(() => {
+        document.getElementById('draw-tab-btn').click();
+      });
+    }
+
+    window.prevPdfPage = function() {
+      if (currentPdfPage > 1) {
+        currentPdfPage--;
+        renderAndSendPdfPage(currentPdfPage);
+      }
+    };
+
+    window.nextPdfPage = function() {
+      if (pdfDoc && currentPdfPage < pdfDoc.numPages) {
+        currentPdfPage++;
+        renderAndSendPdfPage(currentPdfPage);
+      }
     };
 
     function closePeerConnection() {
@@ -286,7 +407,7 @@
       iceCandidateQueue = [];
     }
 
-    // P2P DataChannel 影片極速傳輸
+    // P2P 影片檔推送
     window.handleVideoFileSelect = async function(e) {
       const file = e.target.files[0];
       if (!file) return;
@@ -355,9 +476,7 @@
       });
 
       peerConnection.onicecandidate = (event) => {
-        if (event.candidate) {
-          push(ref(db, `screens/${screenId}/callerCandidates`), event.candidate.toJSON());
-        }
+        if (event.candidate) push(ref(db, `screens/${screenId}/callerCandidates`), event.candidate.toJSON());
       };
 
       const offer = await peerConnection.createOffer();
@@ -382,7 +501,7 @@
       });
     };
 
-    // 啟動實時鏡頭與麥克風
+    // 啟動實時鏡頭
     window.startWebRTC = async function(type) {
       try {
         const constraints = type === 'camera' 
@@ -495,16 +614,19 @@
       const pad = document.getElementById('draw-pad');
       if (url) {
         pad.style.backgroundImage = `url(${url})`;
-        document.getElementById('draw-status-label').innerText = '📸 已載入照片，請直接在照片上方圈寫標註：';
+        document.getElementById('draw-status-label').innerText = '📸 已載入內容，請直接在上方圈寫標註：';
       } else {
         pad.style.backgroundImage = 'none';
         document.getElementById('draw-status-label').innerText = '在下方畫布上手指滑動，大屏同步繪製：';
       }
     }
 
-    window.clearPhotoBackground = function() { setPadBackground(null); };
+    window.clearPhotoBackground = function() { 
+      setPadBackground(null);
+      document.getElementById('photo-pager').style.display = 'none';
+      document.getElementById('pdf-pager').style.display = 'none';
+    };
 
-    // 🌟 精簡化：切換畫筆狀態時保持圖示 ✏️，以背景顏色顯示啟用狀態
     window.toggleLiveDraw = function() {
       isLiveDrawing = !isLiveDrawing;
       const liveCanvas = document.getElementById('live-draw-canvas');
@@ -513,7 +635,7 @@
 
       if (isLiveDrawing) {
         liveCanvas.style.pointerEvents = 'auto';
-        liveBtn.style.background = '#ff9500'; // 啟用時改為亮橘色
+        liveBtn.style.background = '#ff9500';
         colorBar.style.display = 'flex';
       } else {
         liveCanvas.style.pointerEvents = 'none';
