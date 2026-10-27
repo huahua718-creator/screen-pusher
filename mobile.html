@@ -36,12 +36,13 @@
     #local-preview { width: 100%; height: 100%; object-fit: cover; }
     #live-draw-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; touch-action: none; pointer-events: none; }
     
+    /* 🌟 修改：頂部懸浮工具列，改置於頂部 (top: 20px) 避免遮擋 */
     .floating-bar { 
-      position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); 
-      display: flex; gap: 8px; background: rgba(0,0,0,0.75); padding: 8px 12px; 
+      position: absolute; top: 20px; left: 50%; transform: translateX(-50%); 
+      display: flex; gap: 12px; background: rgba(0,0,0,0.75); padding: 8px 16px; 
       border-radius: 30px; backdrop-filter: blur(10px); z-index: 10001;
     }
-    .float-btn { border: none; padding: 10px 14px; border-radius: 20px; font-size: 0.85rem; font-weight: bold; color: white; cursor: pointer; }
+    .float-btn { border: none; padding: 8px 16px; border-radius: 20px; font-size: 1.3rem; font-weight: bold; color: white; cursor: pointer; }
 
     /* 進度條 */
     #progress-container { display: none; margin-top: 10px; background: #e5e5ea; border-radius: 8px; overflow: hidden; height: 12px; }
@@ -66,7 +67,7 @@
     <!-- 1. 網址推送頁籤 -->
     <div id="url-tab" class="tab-content active card">
       <label for="url-input">貼上網址或 YouTube 連結：</label>
-      <input type="url" id="url-input" placeholder="https://example.com">
+      <input type="url" id="url-input" placeholder="example.com 或 https://example.com">
 
       <label for="url-name-input">網址自訂名稱（選填）：</label>
       <input type="text" id="url-name-input" placeholder="例如：英語課影片 / 課表">
@@ -87,7 +88,7 @@
       <button class="action-btn" style="background: #5856d6; margin-bottom: 8px;" onclick="document.getElementById('gallery-input').click()">🖼️ 選擇手機相冊照片推送到大屏</button>
       <input type="file" id="gallery-input" accept="image/*" style="display:none;" onchange="handleGallerySelect(event)">
 
-      <button class="action-btn" style="background: #ff9500; margin-bottom: 8px;" onclick="document.getElementById('video-file-input').click()">🎬 選擇手機影片檔推送到大屏 (iOS 相容)</button>
+      <button class="action-btn" style="background: #ff9500; margin-bottom: 8px;" onclick="document.getElementById('video-file-input').click()">🎬 選擇手機影片檔推送到大屏</button>
       <input type="file" id="video-file-input" accept="video/*" style="display:none;" onchange="handleVideoFileSelect(event)">
       
       <div id="progress-container"><div id="progress-bar"></div></div>
@@ -126,17 +127,19 @@
     </div>
   </div>
 
+  <!-- 🌟 修改：全螢幕鏡頭懸浮工具列，改置於頂部並簡化為圖標 -->
   <div id="camera-fullscreen-overlay">
     <video id="local-preview" autoplay playsinline muted></video>
     <canvas id="live-draw-canvas"></canvas>
 
     <div class="floating-bar">
-      <button class="float-btn" style="background:#34c759;" onclick="pushSnapshotToScreen()">🚀 拍照推送</button>
-      <button class="float-btn" id="live-draw-btn" style="background:#007aff;" onclick="toggleLiveDraw()">✏️ 畫筆標註</button>
-      <button class="float-btn" style="background:#ff3b30;" onclick="stopWebRTC()">❌ 關閉鏡頭</button>
+      <button class="float-btn" style="background:#34c759;" onclick="pushSnapshotToScreen()" title="拍照推送">📷</button>
+      <button class="float-btn" id="live-draw-btn" style="background:#007aff;" onclick="toggleLiveDraw()" title="畫筆標註">✏️</button>
+      <button class="float-btn" style="background:#ff3b30;" onclick="stopWebRTC()" title="關閉鏡頭">❌</button>
     </div>
 
-    <div id="live-color-bar" class="tool-bar" style="display:none; position:absolute; top:20px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.75); padding:8px 15px; border-radius:25px; z-index:10001;">
+    <!-- 調色盤位址調整至懸浮列下方 (top: 75px) -->
+    <div id="live-color-bar" class="tool-bar" style="display:none; position:absolute; top:75px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.75); padding:8px 15px; border-radius:25px; z-index:10001;">
       <div class="color-btn" style="background:#ff3b30;" onclick="selectPen('#ff3b30')"></div>
       <div class="color-btn" style="background:#ffcc00;" onclick="selectPen('#ffcc00')"></div>
       <div class="color-btn" style="background:#34c759;" onclick="selectPen('#34c759')"></div>
@@ -228,12 +231,19 @@
       }
     };
 
+    // 🌟 修改：推送網址時自動補全 http:// (若原本沒有 http:// 或 https://)
     window.sendUrl = function() {
       const screenId = getScreenId(); if (!screenId) return;
       stopWebRTC();
-      const url = document.getElementById('url-input').value.trim();
+      let url = document.getElementById('url-input').value.trim();
       const name = document.getElementById('url-name-input').value.trim();
-      if (url) saveToHistory(url, name);
+      
+      if (url) {
+        if (!/^https?:\/\//i.test(url)) {
+          url = 'http://' + url;
+        }
+        saveToHistory(url, name);
+      }
       set(ref(db, 'screens/' + screenId), { mode: 'url', url: url, updatedAt: Date.now() });
     };
 
@@ -276,7 +286,7 @@
       iceCandidateQueue = [];
     }
 
-    // 🌟 P2P DataChannel 影片極速傳輸邏輯
+    // P2P DataChannel 影片極速傳輸
     window.handleVideoFileSelect = async function(e) {
       const file = e.target.files[0];
       if (!file) return;
@@ -300,11 +310,8 @@
 
       dataChannel.onopen = async () => {
         uploadStatus.innerText = '🚀 開始點對點傳輸影片檔...';
-        
-        // 1. 先發送檔名與大小資訊
         dataChannel.send(JSON.stringify({ type: 'header', size: file.size, mime: file.type || 'video/mp4' }));
 
-        // 2. 切塊傳送 (64KB/chunk)
         const chunkSize = 64 * 1024;
         let offset = 0;
         const reader = new FileReader();
@@ -317,7 +324,6 @@
           uploadStatus.innerText = `🚀 點對點極速傳輸中：${percent}%`;
 
           if (offset < file.size) {
-            // 避免 DataChannel 緩衝區溢位
             if (dataChannel.bufferedAmount > 8 * 1024 * 1024) {
               setTimeout(readNextChunk, 100);
             } else {
@@ -498,6 +504,7 @@
 
     window.clearPhotoBackground = function() { setPadBackground(null); };
 
+    // 🌟 精簡化：切換畫筆狀態時保持圖示 ✏️，以背景顏色顯示啟用狀態
     window.toggleLiveDraw = function() {
       isLiveDrawing = !isLiveDrawing;
       const liveCanvas = document.getElementById('live-draw-canvas');
@@ -506,13 +513,11 @@
 
       if (isLiveDrawing) {
         liveCanvas.style.pointerEvents = 'auto';
-        liveBtn.style.background = '#ff9500';
-        liveBtn.innerText = '✏️ 繪圖中';
+        liveBtn.style.background = '#ff9500'; // 啟用時改為亮橘色
         colorBar.style.display = 'flex';
       } else {
         liveCanvas.style.pointerEvents = 'none';
         liveBtn.style.background = '#007aff';
-        liveBtn.innerText = '✏️ 畫筆標註';
         colorBar.style.display = 'none';
       }
     };
