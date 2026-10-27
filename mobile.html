@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>傳屏遙控器</title>
-  <!-- 引入 PDF.js 解析引擎 -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <style>
     body { font-family: sans-serif; padding: 12px; background: #f2f2f7; color: #333; margin: 0; }
@@ -48,7 +47,6 @@
     #progress-container { display: none; margin-top: 10px; background: #e5e5ea; border-radius: 8px; overflow: hidden; height: 12px; }
     #progress-bar { width: 0%; height: 100%; background: #34c759; transition: width 0.1s; }
 
-    /* 多圖與 PDF 控制控制列樣式 */
     .nav-pager-box { display: none; margin-top: 10px; padding: 8px; background: #e5e5ea; border-radius: 8px; text-align: center; }
     .nav-pager-btn { padding: 6px 16px; border-radius: 6px; border: none; background: #007aff; color: white; font-weight: bold; cursor: pointer; }
   </style>
@@ -58,7 +56,7 @@
   <div style="padding: 5px;">
     <div class="card">
       <label for="room-input">大屏房間碼 (PIN)：</label>
-      <input type="text" id="room-input" placeholder="例如：839201">
+      <input type="text" id="room-input" placeholder="例如：839201" onchange="listenToPageRequests()">
     </div>
 
     <div class="nav-tabs">
@@ -89,29 +87,24 @@
     <div id="camera-tab" class="tab-content card">
       <label>媒體推送方式：</label>
 
-      <!-- 多圖選擇 -->
       <button class="action-btn" style="background: #5856d6; margin-bottom: 8px;" onclick="document.getElementById('gallery-input').click()">🖼️ 選擇照片（可複選多張相片）</button>
       <input type="file" id="gallery-input" accept="image/*" multiple style="display:none;" onchange="handleGallerySelect(event)">
       
-      <!-- 相片導覽列 -->
       <div id="photo-pager" class="nav-pager-box">
         <button class="nav-pager-btn" onclick="prevPhoto()">◄ 上一張</button>
         <span id="photo-indicator" style="margin: 0 10px; font-weight:bold; font-size:0.9rem;">1 / 1</span>
         <button class="nav-pager-btn" onclick="nextPhoto()">下一張 ►</button>
       </div>
 
-      <!-- PDF 文件選擇 -->
       <button class="action-btn" style="background: #e0245e; margin-bottom: 8px; margin-top: 8px;" onclick="document.getElementById('pdf-input').click()">📄 選擇 PDF 文件推送到大屏</button>
       <input type="file" id="pdf-input" accept="application/pdf" style="display:none;" onchange="handlePdfSelect(event)">
 
-      <!-- PDF 頁數導覽列 -->
       <div id="pdf-pager" class="nav-pager-box">
         <button class="nav-pager-btn" onclick="prevPdfPage()">◄ 上一頁</button>
         <span id="pdf-indicator" style="margin: 0 10px; font-weight:bold; font-size:0.9rem;">第 1 / 1 頁</span>
         <button class="nav-pager-btn" onclick="nextPdfPage()">下一頁 ►</button>
       </div>
 
-      <!-- 影片檔選擇 -->
       <button class="action-btn" style="background: #ff9500; margin-bottom: 8px; margin-top: 8px;" onclick="document.getElementById('video-file-input').click()">🎬 選擇手機影片檔推送到大屏</button>
       <input type="file" id="video-file-input" accept="video/*" style="display:none;" onchange="handleVideoFileSelect(event)">
       
@@ -120,7 +113,6 @@
 
       <p style="font-size: 0.8rem; color: #8e8e93; text-align: center; margin: 10px 0;">— 或 —</p>
 
-      <!-- 實況鏡頭 -->
       <button id="cam-start-btn" class="action-btn push-btn" onclick="startWebRTC('camera')">🎥 開啟手機全螢幕實時鏡頭</button>
     </div>
 
@@ -152,7 +144,6 @@
     </div>
   </div>
 
-  <!-- 全螢幕鏡頭與懸浮工具列 -->
   <div id="camera-fullscreen-overlay">
     <video id="local-preview" autoplay playsinline muted></video>
     <canvas id="live-draw-canvas"></canvas>
@@ -177,7 +168,6 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
     import { getDatabase, ref, set, onValue, push, onChildAdded, remove, off, update } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
-    // 設定 PDF.js Worker
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
     const firebaseConfig = {
@@ -198,28 +188,49 @@
     let dataChannel = null;
     let calleeCandidatesRef = null;
     let answerRef = null;
+    let requestPageRef = null;
     let iceCandidateQueue = [];
     let isLiveDrawing = false;
     let isEraserMode = false;
     let currentColor = '#ff3b30';
 
-    // 多圖與 PDF 狀態變數
     let photoList = [];
     let currentPhotoIndex = 0;
     let pdfDoc = null;
     let currentPdfPage = 1;
+    let currentMediaSubtype = 'photo';
 
     const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
-    document.addEventListener('DOMContentLoaded', () => { loadHistory(); });
+    document.addEventListener('DOMContentLoaded', () => { loadHistory(); listenToPageRequests(); });
 
-    window.switchTab = function(tabId, btn) {
+    // 🌟 監聽大屏傳來的翻頁要求
+    window.listenToPageRequests = function() {
+      const screenId = getScreenId(); if (!screenId) return;
+      if (requestPageRef) off(requestPageRef);
+      
+      requestPageRef = ref(db, `screens/${screenId}/requestPage`);
+      onValue(requestPageRef, (snap) => {
+        const reqPage = snap.val();
+        if (reqPage) {
+          if (currentMediaSubtype === 'photo' && reqPage !== currentPhotoIndex + 1 && photoList.length > 0) {
+            sendPhotoIndex(reqPage - 1);
+          } else if (currentMediaSubtype === 'pdf' && reqPage !== currentPdfPage && pdfDoc) {
+            currentPdfPage = reqPage;
+            renderAndSendPdfPage(currentPdfPage);
+          }
+        }
+      });
+    };
+
+    function switchTab(tabId, btn) {
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
       btn.classList.add('active');
       document.getElementById(tabId).classList.add('active');
       if (tabId === 'draw-tab') resizeDrawPad();
-    };
+    }
+    window.switchTab = switchTab;
 
     function loadHistory() {
       const history = JSON.parse(localStorage.getItem('pushedUrlHistory') || '[]');
@@ -265,7 +276,6 @@
       }
     };
 
-    // 網址推送
     window.sendUrl = function() {
       const screenId = getScreenId(); if (!screenId) return;
       stopWebRTC();
@@ -278,11 +288,12 @@
       set(ref(db, 'screens/' + screenId), { mode: 'url', url: url, updatedAt: Date.now() });
     };
 
-    // 🌟 多圖選取與推送 (方案 A：切換相片時自動清空畫筆)
+    // 多圖選取
     window.handleGallerySelect = async function(e) {
       const files = Array.from(e.target.files);
       if (files.length === 0) return;
 
+      currentMediaSubtype = 'photo';
       photoList = [];
       currentPhotoIndex = 0;
 
@@ -292,11 +303,7 @@
       }
 
       document.getElementById('pdf-pager').style.display = 'none';
-      if (photoList.length > 1) {
-        document.getElementById('photo-pager').style.display = 'block';
-      } else {
-        document.getElementById('photo-pager').style.display = 'none';
-      }
+      document.getElementById('photo-pager').style.display = photoList.length > 1 ? 'block' : 'none';
 
       sendPhotoIndex(0);
     };
@@ -333,9 +340,16 @@
       setPadBackground(dataUrl);
 
       const screenId = getScreenId(); if (!screenId) return;
-      // 🌟 方案 A：換照片時自動清空舊筆跡
       remove(ref(db, `screens/${screenId}/drawEvents`));
-      set(ref(db, 'screens/' + screenId), { mode: 'photo', photoUrl: dataUrl, updatedAt: Date.now() }).then(() => {
+      update(ref(db, 'screens/' + screenId), {
+        mode: 'photo',
+        photoUrl: dataUrl,
+        photoIndex: currentPhotoIndex + 1,
+        photoTotal: photoList.length,
+        mediaSubtype: 'photo',
+        requestPage: currentPhotoIndex + 1,
+        updatedAt: Date.now()
+      }).then(() => {
         document.getElementById('draw-tab-btn').click();
       });
     }
@@ -343,12 +357,14 @@
     window.prevPhoto = function() { sendPhotoIndex(currentPhotoIndex - 1); };
     window.nextPhoto = function() { sendPhotoIndex(currentPhotoIndex + 1); };
 
-    // 🌟 📄 PDF 選取、逐頁解析與翻頁標註
+    // PDF 文件處理
     window.handlePdfSelect = async function(e) {
       const file = e.target.files[0];
       if (!file) return;
 
+      currentMediaSubtype = 'pdf';
       document.getElementById('photo-pager').style.display = 'none';
+
       const fileReader = new FileReader();
       fileReader.onload = async function() {
         const typedarray = new Uint8Array(this.result);
@@ -378,9 +394,16 @@
       setPadBackground(dataUrl);
 
       const screenId = getScreenId(); if (!screenId) return;
-      // 🌟 方案 A：換 PDF 頁數時自動清空舊筆跡
       remove(ref(db, `screens/${screenId}/drawEvents`));
-      set(ref(db, 'screens/' + screenId), { mode: 'photo', photoUrl: dataUrl, updatedAt: Date.now() }).then(() => {
+      update(ref(db, 'screens/' + screenId), {
+        mode: 'photo',
+        photoUrl: dataUrl,
+        photoIndex: pageNum,
+        photoTotal: pdfDoc.numPages,
+        mediaSubtype: 'pdf',
+        requestPage: pageNum,
+        updatedAt: Date.now()
+      }).then(() => {
         document.getElementById('draw-tab-btn').click();
       });
     }
@@ -501,7 +524,7 @@
       });
     };
 
-    // 啟動實時鏡頭
+    // 實體鏡頭
     window.startWebRTC = async function(type) {
       try {
         const constraints = type === 'camera' 
@@ -657,6 +680,7 @@
       document.getElementById('live-eraser-btn').classList.toggle('active', isEraserMode);
     };
 
+    // 畫布塗鴉雙向同步
     const pad = document.getElementById('draw-pad');
     const pCtx = pad.getContext('2d');
     const liveCanvas = document.getElementById('live-draw-canvas');
@@ -690,22 +714,6 @@
       const currentX = touch.clientX - rect.left;
       const currentY = touch.clientY - rect.top;
 
-      targetCtx.beginPath();
-      targetCtx.moveTo(lastX, lastY);
-      targetCtx.lineTo(currentX, currentY);
-      
-      if (isEraserMode) {
-        targetCtx.globalCompositeOperation = 'destination-out';
-        targetCtx.lineWidth = 20;
-      } else {
-        targetCtx.globalCompositeOperation = 'source-over';
-        targetCtx.strokeStyle = currentColor;
-        targetCtx.lineWidth = 3;
-      }
-
-      targetCtx.lineCap = 'round'; targetCtx.stroke();
-      targetCtx.globalCompositeOperation = 'source-over';
-
       push(ref(db, `screens/${screenId}/drawEvents`), {
         x0: lastX / targetElement.width, y0: lastY / targetElement.height,
         x1: currentX / targetElement.width, y1: currentY / targetElement.height,
@@ -732,6 +740,35 @@
     liveCanvas.addEventListener('mousedown', e => handleStart(e, liveCanvas));
     liveCanvas.addEventListener('mousemove', e => handleMove(e, lCtx, liveCanvas));
     liveCanvas.addEventListener('mouseup', handleEnd);
+
+    // 🌟 接收大屏端畫筆筆跡（雙向同步）
+    const screenId = getScreenId();
+    if (screenId) {
+      onChildAdded(ref(db, `screens/${screenId}/drawEvents`), (snapshot) => {
+        const d = snapshot.val();
+        if (d) {
+          pCtx.beginPath();
+          pCtx.moveTo(d.x0 * pad.width, d.y0 * pad.height);
+          pCtx.lineTo(d.x1 * pad.width, d.y1 * pad.height);
+          if (d.isEraser) {
+            pCtx.globalCompositeOperation = 'destination-out';
+            pCtx.lineWidth = d.size || 20;
+          } else {
+            pCtx.globalCompositeOperation = 'source-over';
+            pCtx.strokeStyle = d.color;
+            pCtx.lineWidth = d.size || 4;
+          }
+          pCtx.lineCap = 'round'; pCtx.stroke();
+          pCtx.globalCompositeOperation = 'source-over';
+        }
+      });
+
+      onValue(ref(db, `screens/${screenId}/drawEvents`), (snapshot) => {
+        if (!snapshot.exists()) {
+          pCtx.clearRect(0, 0, pad.width, pad.height);
+        }
+      });
+    }
 
     window.clearCanvas = function() {
       const screenId = getScreenId(); if (!screenId) return;
