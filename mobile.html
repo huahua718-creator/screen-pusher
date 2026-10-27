@@ -47,7 +47,8 @@
     #progress-container { display: none; margin-top: 10px; background: #e5e5ea; border-radius: 8px; overflow: hidden; height: 12px; }
     #progress-bar { width: 0%; height: 100%; background: #34c759; transition: width 0.1s; }
 
-    .nav-pager-box { display: none; margin-top: 10px; padding: 8px; background: #e5e5ea; border-radius: 8px; text-align: center; }
+    /* 翻頁控制列樣式 */
+    .nav-pager-box { display: none; margin-bottom: 8px; padding: 8px; background: #e5e5ea; border-radius: 8px; text-align: center; }
     .nav-pager-btn { padding: 6px 16px; border-radius: 6px; border: none; background: #007aff; color: white; font-weight: bold; cursor: pointer; }
   </style>
 </head>
@@ -89,21 +90,9 @@
 
       <button class="action-btn" style="background: #5856d6; margin-bottom: 8px;" onclick="document.getElementById('gallery-input').click()">🖼️ 選擇照片（可複選多張相片）</button>
       <input type="file" id="gallery-input" accept="image/*" multiple style="display:none;" onchange="handleGallerySelect(event)">
-      
-      <div id="photo-pager" class="nav-pager-box">
-        <button class="nav-pager-btn" onclick="prevPhoto()">◄ 上一張</button>
-        <span id="photo-indicator" style="margin: 0 10px; font-weight:bold; font-size:0.9rem;">1 / 1</span>
-        <button class="nav-pager-btn" onclick="nextPhoto()">下一張 ►</button>
-      </div>
 
       <button class="action-btn" style="background: #e0245e; margin-bottom: 8px; margin-top: 8px;" onclick="document.getElementById('pdf-input').click()">📄 選擇 PDF 文件推送到大屏</button>
       <input type="file" id="pdf-input" accept="application/pdf" style="display:none;" onchange="handlePdfSelect(event)">
-
-      <div id="pdf-pager" class="nav-pager-box">
-        <button class="nav-pager-btn" onclick="prevPdfPage()">◄ 上一頁</button>
-        <span id="pdf-indicator" style="margin: 0 10px; font-weight:bold; font-size:0.9rem;">第 1 / 1 頁</span>
-        <button class="nav-pager-btn" onclick="nextPdfPage()">下一頁 ►</button>
-      </div>
 
       <button class="action-btn" style="background: #ff9500; margin-bottom: 8px; margin-top: 8px;" onclick="document.getElementById('video-file-input').click()">🎬 選擇手機影片檔推送到大屏</button>
       <input type="file" id="video-file-input" accept="video/*" style="display:none;" onchange="handleVideoFileSelect(event)">
@@ -116,9 +105,24 @@
       <button id="cam-start-btn" class="action-btn push-btn" onclick="startWebRTC('camera')">🎥 開啟手機全螢幕實時鏡頭</button>
     </div>
 
-    <!-- 3. 畫筆標註頁籤 -->
+    <!-- 3. 畫筆標註頁籤 (🌟 已將照片/PDF 翻頁按鈕改移至此處) -->
     <div id="draw-tab" class="tab-content card">
       <label id="draw-status-label">在畫布上手指滑動標註，大屏同步繪製：</label>
+
+      <!-- 🌟 相片翻頁列 -->
+      <div id="photo-pager" class="nav-pager-box">
+        <button class="nav-pager-btn" onclick="prevPhoto()">◄ 上一張</button>
+        <span id="photo-indicator" style="margin: 0 10px; font-weight:bold; font-size:0.9rem;">1 / 1</span>
+        <button class="nav-pager-btn" onclick="nextPhoto()">下一張 ►</button>
+      </div>
+
+      <!-- 🌟 PDF 頁數翻頁列 -->
+      <div id="pdf-pager" class="nav-pager-box">
+        <button class="nav-pager-btn" onclick="prevPdfPage()">◄ 上一頁</button>
+        <span id="pdf-indicator" style="margin: 0 10px; font-weight:bold; font-size:0.9rem;">第 1 / 1 頁</span>
+        <button class="nav-pager-btn" onclick="nextPdfPage()">下一頁 ►</button>
+      </div>
+
       <canvas id="draw-pad"></canvas>
       
       <div class="tool-bar">
@@ -204,7 +208,7 @@
 
     document.addEventListener('DOMContentLoaded', () => { loadHistory(); listenToPageRequests(); });
 
-    // 🌟 監聽大屏傳來的翻頁要求
+    // 監聽大屏傳來的翻頁要求
     window.listenToPageRequests = function() {
       const screenId = getScreenId(); if (!screenId) return;
       if (requestPageRef) off(requestPageRef);
@@ -741,7 +745,7 @@
     liveCanvas.addEventListener('mousemove', e => handleMove(e, lCtx, liveCanvas));
     liveCanvas.addEventListener('mouseup', handleEnd);
 
-    // 🌟 接收大屏端畫筆筆跡（雙向同步）
+    // 接收大屏端畫筆筆跡（雙向同步）
     const screenId = getScreenId();
     if (screenId) {
       onChildAdded(ref(db, `screens/${screenId}/drawEvents`), (snapshot) => {
