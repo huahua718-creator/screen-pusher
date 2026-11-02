@@ -87,6 +87,11 @@
 
   <!-- 🌟 大屏標註與縮放工具列 -->
   <div id="screen-draw-toolbar">
+  <!-- 最小化時僅顯示的小按鈕 (預設顯示) -->
+  <button class="screen-tool-btn" id="screen-tb-toggle-btn" onclick="toggleScreenToolbar()" style="background:#007aff; border-radius:20px; padding:6px 14px;">✏️ 標註工具</button>
+  
+  <!-- 展開時顯示的完整工具列 (預設隱藏 display:none) -->
+  <div id="screen-tb-content" style="display: none; align-items: center; gap: 8px;">
     <button class="screen-tool-btn" id="screen-pan-btn" onclick="togglePanMode()" title="切換移動/標註模式">🖐️ 移動</button>
     <button class="screen-tool-btn" onclick="zoomIn()" title="放大">🔍+</button>
     <button class="screen-tool-btn" onclick="zoomOut()" title="縮小">🔍-</button>
@@ -99,7 +104,9 @@
     <div class="screen-color-btn" style="background:#ffffff;" onclick="setScreenPen('#ffffff')"></div>
     <button class="screen-tool-btn" id="screen-eraser-btn" onclick="toggleScreenEraser()">🧹 橡皮擦</button>
     <button class="screen-tool-btn" style="background:#ff3b30;" onclick="clearScreenCanvas()">🗑️ 清除筆跡</button>
+    <button class="screen-tool-btn" style="background:#555;" onclick="toggleScreenToolbar()">✖ 最小化</button>
   </div>
+</div>
 
   <button id="reset-btn" onclick="resetScreen()">結束並返回待機</button>
 
@@ -525,6 +532,32 @@
       set(screenRef, { mode: 'idle' });
       resetUI();
     };
+    let isScreenTbExpanded = false;
+
+window.toggleScreenToolbar = function() {
+  isScreenTbExpanded = !isScreenTbExpanded;
+  const toggleBtn = document.getElementById('screen-tb-toggle-btn');
+  const content = document.getElementById('screen-tb-content');
+
+  if (isScreenTbExpanded) {
+    toggleBtn.style.display = 'none';
+    content.style.display = 'flex';
+  } else {
+    toggleBtn.style.display = 'inline-block';
+    content.style.display = 'none';
+  }
+};
+
+// 確保重設或切換模式時預設維持最小化
+function setToolbarToMinimized() {
+  isScreenTbExpanded = false;
+  const toggleBtn = document.getElementById('screen-tb-toggle-btn');
+  const content = document.getElementById('screen-tb-content');
+  if (toggleBtn && content) {
+    toggleBtn.style.display = 'inline-block';
+    content.style.display = 'none';
+  }
+}
   </script>
 </body>
 </html>
