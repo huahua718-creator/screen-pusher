@@ -109,6 +109,7 @@
     <!-- 3. 畫筆標註頁籤 (🌟 已將照片/PDF 翻頁按鈕改移至此處) -->
     <div id="draw-tab" class="tab-content card">
       <label id="draw-status-label">在畫布上手指滑動標註，大屏同步繪製：</label>
+      <button class="action-btn" style="background: #5856d6; margin-bottom: 10px;" onclick="openDrawFullscreen()">⛶ 開啟全螢幕手繪標註</button>
 
       <!-- 🌟 相片翻頁列 -->
       <div id="photo-pager" class="nav-pager-box">
@@ -158,9 +159,10 @@
   <button class="float-btn" id="cam-switch-btn" style="background:#5856d6;" onclick="switchCamera()" title="切換前後鏡頭">🔄</button>
   <button class="float-btn" id="cam-mic-btn" style="background:#8e8e93;" onclick="toggleCamMic()" title="聲音傳送 (預設靜音)">🔇</button>
   <button class="float-btn" id="cam-record-btn" style="background:#ff9500;" onclick="toggleCameraRecording()" title="邊投屏邊錄影">🔴</button>
+  <button class="float-btn" id="cam-split-btn" style="background:#17a2b8; display:none;" onclick="splitRecordingSegment()" title="儲存當前片段並開啟下一段">✂️</button>
   <button class="float-btn" id="live-draw-btn" style="background:#007aff;" onclick="toggleLiveDraw()" title="畫筆標註">✏️</button>
   <button class="float-btn" style="background:#ff3b30;" onclick="stopWebRTC()" title="關閉鏡頭">❌</button>
-</div>
+    </div>
 
     <div id="live-color-bar" class="tool-bar" style="display:none; position:absolute; top:75px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.75); padding:8px 15px; border-radius:25px; z-index:10001;">
       <div class="color-btn" style="background:#ff3b30;" onclick="selectPen('#ff3b30')"></div>
@@ -170,6 +172,23 @@
       <div class="color-btn" style="background:#ffffff;" onclick="selectPen('#ffffff')"></div>
       <button class="tool-btn" id="live-eraser-btn" onclick="toggleEraser()">🧹 橡皮擦</button>
     </div>
+    </div>
+    <!-- 🌟 全螢幕手繪標註 overlay -->
+<div id="draw-fullscreen-overlay" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:#1c1c1e; z-index:9999;">
+  <canvas id="fs-draw-pad" style="width:100%; height:100%; background-size:contain; background-repeat:no-repeat; background-position:center; touch-action:none;"></canvas>
+
+  <!-- 懸浮工具列 (包含筆觸顏色、橡皮擦、清除筆跡、移除背景照片、退出) -->
+  <div class="floating-bar" style="top: 15px;">
+    <div class="color-btn" style="background:#ff3b30;" onclick="selectPen('#ff3b30')"></div>
+    <div class="color-btn" style="background:#ffcc00;" onclick="selectPen('#ffcc00')"></div>
+    <div class="color-btn" style="background:#34c759;" onclick="selectPen('#34c759')"></div>
+    <div class="color-btn" style="background:#007aff;" onclick="selectPen('#007aff')"></div>
+    <div class="color-btn" style="background:#ffffff;" onclick="selectPen('#ffffff')"></div>
+    <button class="float-btn" id="fs-eraser-btn" style="background:#555;" onclick="toggleEraser()" title="橡皮擦">🧹</button>
+    <button class="float-btn" style="background:#ff3b30;" onclick="clearCanvas()" title="清除筆跡">🗑️</button>
+    <button class="float-btn" style="background:#8e8e93;" onclick="clearPhotoBackground()" title="移除背景照片">🖼️</button>
+    <button class="float-btn" style="background:#e0245e;" onclick="closeDrawFullscreen()" title="退出全螢幕">↙️</button>
+  </div>
   </div>
 
   <script type="module">
@@ -656,46 +675,86 @@ window.toggleCamMic = function() {
 };
 
 // 4. 邊投屏邊錄影功能 (手機端錄影並下載)
+let currentSegmentIndex = 1;
+
+// 開啟/停止錄影
 window.toggleCameraRecording = function() {
   if (!localStream) return;
 
-  const btn = document.getElementById('cam-record-btn');
+  const recBtn = document.getElementById('cam-record-btn');
+  const splitBtn = document.getElementById('cam-split-btn');
+
   if (!isRecording) {
-    recordedChunks = [];
-    try {
-      const mimeType = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm';
-      mediaRecorder = new MediaRecorder(localStream, { mimeType });
-    } catch (e) {
-      mediaRecorder = new MediaRecorder(localStream);
-    }
-
-    mediaRecorder.ondataavailable = (e) => {
-      if (e.data && e.data.size > 0) recordedChunks.push(e.data);
-    };
-
-    mediaRecorder.onstop = () => {
-      const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'video/mp4' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `camera-record-${Date.now()}.mp4`;
-      a.click();
-      URL.revokeObjectURL(url);
-    };
-
-    mediaRecorder.start(1000);
+    currentSegmentIndex = 1;
+    startNewRecorderSegment();
     isRecording = true;
-    btn.innerText = '⏹️';
-    btn.style.background = '#ff3b30';
+
+    recBtn.innerText = '⏹️';
+    recBtn.style.background = '#ff3b30';
+    splitBtn.style.display = 'block'; // 顯示分段按鈕
   } else {
-    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-      mediaRecorder.stop();
-    }
+    stopCurrentRecorder();
     isRecording = false;
-    btn.innerText = '🔴';
-    btn.style.background = '#ff9500';
+
+    recBtn.innerText = '🔴';
+    recBtn.style.background = '#ff9500';
+    splitBtn.style.display = 'none';  // 隱藏分段按鈕
   }
 };
+
+// ✂️ 無縫分段：儲存當前片段並自動開始下一段
+window.splitRecordingSegment = function() {
+  if (!isRecording || !mediaRecorder) return;
+  
+  // 停止目前片段（會觸發下載），並在完成後自動啟動下一段
+  stopCurrentRecorder(() => {
+    currentSegmentIndex++;
+    startNewRecorderSegment();
+  });
+};
+
+// 內部函式：啟動新的錄製片段
+function startNewRecorderSegment() {
+  recordedChunks = [];
+  try {
+    const mimeType = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm';
+    mediaRecorder = new MediaRecorder(localStream, { mimeType });
+  } catch (e) {
+    mediaRecorder = new MediaRecorder(localStream);
+  }
+
+  mediaRecorder.ondataavailable = (e) => {
+    if (e.data && e.data.size > 0) recordedChunks.push(e.data);
+  };
+
+  const segNum = currentSegmentIndex; // 鎖定目前片段編號
+  mediaRecorder.onstop = () => {
+    const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'video/mp4' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `camera-record-segment${segNum}-${Date.now()}.mp4`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  mediaRecorder.start(1000);
+}
+
+// 內部函式：停止當前錄製
+function stopCurrentRecorder(callback) {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    if (callback) {
+      // 若有續接下一段的 callback，等 stop 完成後執行
+      const originalOnStop = mediaRecorder.onstop;
+      mediaRecorder.onstop = (e) => {
+        if (originalOnStop) originalOnStop(e);
+        callback();
+      };
+    }
+    mediaRecorder.stop();
+  }
+}
 
     window.stopWebRTC = function() {
       closePeerConnection();
@@ -913,6 +972,88 @@ window.toggleCameraRecording = function() {
     });
   }
 };
+    let isDrawFullscreen = false;
+const fsPad = document.getElementById('fs-draw-pad');
+const fsCtx = fsPad.getContext('2d');
+
+// 1. 開啟全螢幕標註模式
+window.openDrawFullscreen = function() {
+  isDrawFullscreen = true;
+  document.getElementById('draw-fullscreen-overlay').style.display = 'block';
+  resizeFsDrawPad();
+  syncFsBackground();
+};
+
+// 2. 退出全螢幕標註模式
+window.closeDrawFullscreen = function() {
+  isDrawFullscreen = false;
+  document.getElementById('draw-fullscreen-overlay').style.display = 'none';
+  resizeDrawPad(); // 重新整理普通模式畫布
+};
+
+// 同步背景圖片至全螢幕畫布
+function syncFsBackground() {
+  const normalPad = document.getElementById('draw-pad');
+  fsPad.style.backgroundImage = normalPad.style.backgroundImage;
+}
+
+// 調整全螢幕畫布尺寸
+function resizeFsDrawPad() {
+  fsPad.width = window.innerWidth;
+  fsPad.height = window.innerHeight;
+}
+
+// 修改原有的 setPadBackground 讓全螢幕模式同步更新背景圖片
+const originalSetPadBackground = window.setPadBackground;
+window.setPadBackground = function(url) {
+  const pad = document.getElementById('draw-pad');
+  if (url) {
+    pad.style.backgroundImage = `url(${url})`;
+    fsPad.style.backgroundImage = `url(${url})`;
+    document.getElementById('draw-status-label').innerText = '📸 已載入內容，請直接在上方圈寫標註：';
+  } else {
+    pad.style.backgroundImage = 'none';
+    fsPad.style.backgroundImage = 'none';
+    document.getElementById('draw-status-label').innerText = '在下方畫布上手指滑動，大屏同步繪製：';
+  }
+};
+
+// 綁定全螢幕畫布觸控與繪圖事件
+fsPad.addEventListener('touchstart', e => handleStart(e, fsPad));
+fsPad.addEventListener('touchmove', e => handleMove(e, fsCtx, fsPad));
+fsPad.addEventListener('touchend', handleEnd);
+fsPad.addEventListener('mousedown', e => handleStart(e, fsPad));
+fsPad.addEventListener('mousemove', e => handleMove(e, fsCtx, fsPad));
+fsPad.addEventListener('mouseup', handleEnd);
+
+// 大屏或手機繪圖同步至全螢幕畫布
+if (screenId) {
+  onChildAdded(ref(db, `screens/${screenId}/drawEvents`), (snapshot) => {
+    const d = snapshot.val();
+    if (d) {
+      // 繪製至全螢幕 Canvas
+      fsCtx.beginPath();
+      fsCtx.moveTo(d.x0 * fsPad.width, d.y0 * fsPad.height);
+      fsCtx.lineTo(d.x1 * fsPad.width, d.y1 * fsPad.height);
+      if (d.isEraser) {
+        fsCtx.globalCompositeOperation = 'destination-out';
+        fsCtx.lineWidth = d.size || 20;
+      } else {
+        fsCtx.globalCompositeOperation = 'source-over';
+        fsCtx.strokeStyle = d.color;
+        fsCtx.lineWidth = d.size || 4;
+      }
+      fsCtx.lineCap = 'round'; fsCtx.stroke();
+      fsCtx.globalCompositeOperation = 'source-over';
+    }
+  });
+
+  onValue(ref(db, `screens/${screenId}/drawEvents`), (snapshot) => {
+    if (!snapshot.exists()) {
+      fsCtx.clearRect(0, 0, fsPad.width, fsPad.height);
+    }
+  });
+}
   </script>
 </body>
 </html>
