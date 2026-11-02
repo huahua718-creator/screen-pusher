@@ -154,10 +154,13 @@
     <canvas id="live-draw-canvas"></canvas>
 
     <div class="floating-bar">
-      <button class="float-btn" style="background:#34c759;" onclick="pushSnapshotToScreen()" title="拍照推送">📷</button>
-      <button class="float-btn" id="live-draw-btn" style="background:#007aff;" onclick="toggleLiveDraw()" title="畫筆標註">✏️</button>
-      <button class="float-btn" style="background:#ff3b30;" onclick="stopWebRTC()" title="關閉鏡頭">❌</button>
-    </div>
+  <button class="float-btn" style="background:#34c759;" onclick="pushSnapshotToScreen()" title="拍照推送">📷</button>
+  <button class="float-btn" id="cam-switch-btn" style="background:#5856d6;" onclick="switchCamera()" title="切換前後鏡頭">🔄</button>
+  <button class="float-btn" id="cam-mic-btn" style="background:#8e8e93;" onclick="toggleCamMic()" title="聲音傳送 (預設靜音)">🔇</button>
+  <button class="float-btn" id="cam-record-btn" style="background:#ff9500;" onclick="toggleCameraRecording()" title="邊投屏邊錄影">🔴</button>
+  <button class="float-btn" id="live-draw-btn" style="background:#007aff;" onclick="toggleLiveDraw()" title="畫筆標註">✏️</button>
+  <button class="float-btn" style="background:#ff3b30;" onclick="stopWebRTC()" title="關閉鏡頭">❌</button>
+</div>
 
     <div id="live-color-bar" class="tool-bar" style="display:none; position:absolute; top:75px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.75); padding:8px 15px; border-radius:25px; z-index:10001;">
       <div class="color-btn" style="background:#ff3b30;" onclick="selectPen('#ff3b30')"></div>
@@ -530,69 +533,169 @@
     };
 
     // 實體鏡頭
-    window.startWebRTC = async function(type) {
-      try {
-        const constraints = type === 'camera' 
-          ? { video: { facingMode: { ideal: "environment" } }, audio: false }
-          : { video: false, audio: true };
-
-        localStream = await navigator.mediaDevices.getUserMedia(constraints);
-
-        if (type === 'camera') {
-          const preview = document.getElementById('local-preview');
-          preview.srcObject = localStream;
-          preview.play().catch(e => console.log("Safari 鏡頭預覽:", e));
-          document.getElementById('camera-fullscreen-overlay').style.display = 'block';
-          resizeLiveCanvas();
+    let currentFacingMode = 'environment'; // 預設後置鏡頭 ('environment' / 'user')
+    let isCamMicEnabled = false;           // 預設聲音關閉
+    let mediaRecorder = null;
+    let recordedChunks = [];
+    let isRecording = false;
+    // 1. 修改鏡頭啟動邏輯（同時申請影音權限，但預設聲音關閉）
+window.startWebRTC = async function(type) {
+  try {
+    const constraints = type === 'camera' 
+      ? { 
+          video: { facingMode: { ideal: currentFacingMode } }, 
+          audio: true // 同時獲取音訊軌道
         }
+      : { video: false, audio: true };
 
-        closePeerConnection();
-        const screenId = getScreenId(); if (!screenId) return;
-        await remove(ref(db, 'screens/' + screenId));
+    localStream = await navigator.mediaDevices.getUserMedia(constraints);
 
-        peerConnection = new RTCPeerConnection(rtcConfig);
-        localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+    if (type === 'camera') {
+      // 預設關閉聲音軌道（靜音）
+      localStream.getAudioTracks().forEach(track => track.enabled = false);
+      isCamMicEnabled = false;
 
-        calleeCandidatesRef = ref(db, `screens/${screenId}/calleeCandidates`);
-        onChildAdded(calleeCandidatesRef, (snapshot) => {
-          if (snapshot.val()) {
-            const candidate = new RTCIceCandidate(snapshot.val());
-            if (peerConnection && peerConnection.remoteDescription) {
-              peerConnection.addIceCandidate(candidate).catch(e => console.error(e));
-            } else {
-              iceCandidateQueue.push(candidate);
-            }
-          }
-        });
+      const preview = document.getElementById('local-preview');
+      preview.srcObject = localStream;
+      preview.play().catch(e => console.log("預覽播報:", e));
+      document.getElementById('camera-fullscreen-overlay').style.display = 'block';
+      resizeLiveCanvas();
+    }
 
-        peerConnection.onicecandidate = (event) => {
-          if (event.candidate) push(ref(db, `screens/${screenId}/callerCandidates`), event.candidate.toJSON());
-        };
+    closePeerConnection();
+    const screenId = getScreenId(); if (!screenId) return;
+    await remove(ref(db, 'screens/' + screenId));
 
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
+    peerConnection = new RTCPeerConnection(rtcConfig);
+    localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
 
-        await update(ref(db, `screens/${screenId}`), {
-          mode: 'webrtc',
-          mediaType: type,
-          offer: { type: offer.type, sdp: offer.sdp }
-        });
+    calleeCandidatesRef = ref(db, `screens/${screenId}/calleeCandidates`);
+    onChildAdded(calleeCandidatesRef, (snapshot) => {
+      if (snapshot.val()) {
+        const candidate = new RTCIceCandidate(snapshot.val());
+        if (peerConnection && peerConnection.remoteDescription) {
+          peerConnection.addIceCandidate(candidate).catch(e => console.error(e));
+        } else {
+          iceCandidateQueue.push(candidate);
+        }
+      }
+    });
 
-        answerRef = ref(db, `screens/${screenId}/answer`);
-        onValue(answerRef, async (snap) => {
-          const ans = snap.val();
-          if (ans && peerConnection && peerConnection.signalingState !== 'stable') {
-            await peerConnection.setRemoteDescription(new RTCSessionDescription(ans)).catch(e => console.error(e));
-            while (iceCandidateQueue.length > 0) {
-              const cand = iceCandidateQueue.shift();
-              await peerConnection.addIceCandidate(cand).catch(e => console.error(e));
-            }
-          }
-        });
-
-        toggleMediaUI(type, true);
-      } catch (err) { alert('請確保已給予鏡頭/麥克風權限：' + err.message); }
+    peerConnection.onicecandidate = (event) => {
+      if (event.candidate) push(ref(db, `screens/${screenId}/callerCandidates`), event.candidate.toJSON());
     };
+
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+
+    await update(ref(db, `screens/${screenId}`), {
+      mode: 'webrtc',
+      mediaType: type,
+      offer: { type: offer.type, sdp: offer.sdp }
+    });
+
+    answerRef = ref(db, `screens/${screenId}/answer`);
+    onValue(answerRef, async (snap) => {
+      const ans = snap.val();
+      if (ans && peerConnection && peerConnection.signalingState !== 'stable') {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(ans)).catch(e => console.error(e));
+        while (iceCandidateQueue.length > 0) {
+          const cand = iceCandidateQueue.shift();
+          await peerConnection.addIceCandidate(cand).catch(e => console.error(e));
+        }
+      }
+    });
+
+    toggleMediaUI(type, true);
+  } catch (err) { alert('請確保已給予鏡頭/麥克風權限：' + err.message); }
+};
+
+// 2. 切換前後鏡頭 (不中斷 WebRTC 串流)
+window.switchCamera = async function() {
+  if (!localStream) return;
+  currentFacingMode = (currentFacingMode === 'environment') ? 'user' : 'environment';
+
+  try {
+    const oldVideoTrack = localStream.getVideoTracks()[0];
+    const newStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: currentFacingMode } }
+    });
+    const newVideoTrack = newStream.getVideoTracks()[0];
+
+    // 替換本地流中的視訊軌道
+    if (oldVideoTrack) {
+      localStream.removeTrack(oldVideoTrack);
+      oldVideoTrack.stop();
+    }
+    localStream.addTrack(newVideoTrack);
+
+    // 更新本地預覽畫面
+    document.getElementById('local-preview').srcObject = localStream;
+
+    // 透過 replaceTrack 無縫替換送到大屏的 WebRTC 畫面
+    if (peerConnection) {
+      const sender = peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
+      if (sender) sender.replaceTrack(newVideoTrack);
+    }
+  } catch (err) {
+    alert('無法切換鏡頭：' + err.message);
+  }
+};
+
+// 3. 切換麥克風開關 (預設靜音 ➔ 點擊開啟)
+window.toggleCamMic = function() {
+  if (!localStream) return;
+  const audioTrack = localStream.getAudioTracks()[0];
+  if (audioTrack) {
+    isCamMicEnabled = !isCamMicEnabled;
+    audioTrack.enabled = isCamMicEnabled;
+    const btn = document.getElementById('cam-mic-btn');
+    btn.innerText = isCamMicEnabled ? '🎙️' : '🔇';
+    btn.style.background = isCamMicEnabled ? '#34c759' : '#8e8e93';
+  }
+};
+
+// 4. 邊投屏邊錄影功能 (手機端錄影並下載)
+window.toggleCameraRecording = function() {
+  if (!localStream) return;
+
+  const btn = document.getElementById('cam-record-btn');
+  if (!isRecording) {
+    recordedChunks = [];
+    try {
+      const mimeType = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm';
+      mediaRecorder = new MediaRecorder(localStream, { mimeType });
+    } catch (e) {
+      mediaRecorder = new MediaRecorder(localStream);
+    }
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) recordedChunks.push(e.data);
+    };
+
+    mediaRecorder.onstop = () => {
+      const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'video/mp4' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `camera-record-${Date.now()}.mp4`;
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+
+    mediaRecorder.start(1000);
+    isRecording = true;
+    btn.innerText = '⏹️';
+    btn.style.background = '#ff3b30';
+  } else {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.stop();
+    }
+    isRecording = false;
+    btn.innerText = '🔴';
+    btn.style.background = '#ff9500';
+  }
+};
 
     window.stopWebRTC = function() {
       closePeerConnection();
