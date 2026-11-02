@@ -408,13 +408,21 @@
       iceCandidateQueue = [];
       
       peerConnection.ontrack = (event) => {
-        const remoteVideo = document.getElementById('remote-video');
-        if (remoteVideo.srcObject !== event.streams[0]) {
-          remoteVideo.srcObject = event.streams[0];
-          remoteVideo.muted = (mediaType === 'camera');
-          remoteVideo.play().catch(err => console.warn("播放中:", err));
-        }
-      };
+  const remoteVideo = document.getElementById('remote-video');
+  if (remoteVideo.srcObject !== event.streams[0]) {
+    remoteVideo.srcObject = event.streams[0];
+    
+    // 影音一律解除靜音，讓手機端自由控制 sound-track 的開啟與關閉
+    remoteVideo.muted = false; 
+    
+    remoteVideo.play().catch(err => {
+      console.warn("自動播放限制，嘗試靜音播放:", err);
+      // 若受瀏覽器 Autoplay 政策限制，備用嘗試
+      remoteVideo.muted = true;
+      remoteVideo.play();
+    });
+  }
+};
 
       peerConnection.ondatachannel = (event) => {
         const receiveChannel = event.channel;
